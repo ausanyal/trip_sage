@@ -1,0 +1,3224 @@
+{
+  "wayanad": {
+    "trip_spec": {
+      "origin": "Koramangala, Bengaluru",
+      "destination": "Wayanad, Kerala",
+      "start_date": "2026-12-21",
+      "end_date": "2026-12-26",
+      "departure_time_pref": "2:00 PM from Koramangala",
+      "return_timing_pref": "Early afternoon Wayanad -> Mysuru; after lunch Mysuru -> Bengaluru",
+      "transport_mode": "road",
+      "stay_strategy": "hybrid",
+      "vehicle_name": "Jeep Meridian SUV (Own Car)",
+      "destination_villa_bhk": 2,
+      "nightly_budget_min_inr": 15000,
+      "nightly_budget_max_inr": 20000,
+      "party": {
+        "adults": 2,
+        "children": 2,
+        "child_ages": [
+          8,
+          10
+        ],
+        "room_setup": "Deluxe Room + Extra Bed (Radisson Mysore) \u00b7 2 BHK Villa (Wayanad)"
+      },
+      "pinned_stays": [
+        {
+          "leg_label": "Outbound Transit (Night 1)",
+          "city": "Mysuru",
+          "property_name": "Radisson Blu Plaza Hotel Mysore",
+          "check_in": "2026-12-21",
+          "check_out": "2026-12-22",
+          "room_config": "Deluxe Room + 1 Extra Bed + Super Breakfast"
+        },
+        {
+          "leg_label": "Return Transit (Night 5 \u00b7 Christmas)",
+          "city": "Mysuru",
+          "property_name": "Radisson Blu Plaza Hotel Mysore",
+          "check_in": "2026-12-25",
+          "check_out": "2026-12-26",
+          "room_config": "Deluxe Room + 1 Extra Bed + Super Breakfast"
+        }
+      ],
+      "activities": {
+        "wildlife_safari": false,
+        "adventure_water": false,
+        "moderate_climbs": true,
+        "transit_sightseeing": false,
+        "dietary": "both",
+        "pace": "balanced"
+      }
+    },
+    "platform_coverage": [
+      {
+        "platform": "Airbnb",
+        "status": "matched",
+        "listings_scanned": 84,
+        "note": "Scanned 2 BHK Superhost & Guest Favorite coffee-estate villas across Vythiri, Kalpetta & Meppadi."
+      },
+      {
+        "platform": "The Blue Kite",
+        "status": "zero_inventory_pivoted",
+        "listings_scanned": 0,
+        "note": "0 Wayanad villas (operates in Goa, Nainital, Rishikesh & BLR) -> auto-pivoted to StayVista & SaffronStays."
+      },
+      {
+        "platform": "StayVista & SaffronStays",
+        "status": "matched",
+        "listings_scanned": 29,
+        "note": "Matched syndicated luxury villas where direct portal rates strip 14.2% OTA/Airbnb guest fees."
+      },
+      {
+        "platform": "Radisson Direct \u00b7 MMT \u00b7 Agoda \u00b7 Booking",
+        "status": "live_scanned",
+        "listings_scanned": 16,
+        "note": "Compared Deluxe + Extra Bed + Age<=10 breakfast rules for Dec 21 (weekday) & Dec 25 (Christmas)."
+      }
+    ],
+    "tool_trace": [
+      {
+        "phase": "Phase 1 \u00b7 Intent & Constraints",
+        "tool_name": "hydrate_family_trip_spec",
+        "status": "completed",
+        "latency_ms": 95,
+        "input_summary": "Koramangala, Bengaluru -> Wayanad, Kerala (2026-12-21 to 2026-12-26) \u00b7 2A+2C [8, 10] \u00b7 Jeep Meridian SUV (Own Car)",
+        "finding_summary": "Locked Hybrid Stay strategy, 2 PM rollout, Jeep Meridian 203mm clearance, climbs=ON, safaris/water/Mysuru-stops=OFF."
+      },
+      {
+        "phase": "Phase 1 \u00b7 Intent & Constraints",
+        "tool_name": "route_corridor_and_gate_validator",
+        "status": "completed",
+        "latency_ms": 164,
+        "input_summary": "NICE Rd -> NH275 -> Radisson Mysore -> NH766 Bandipur/Muthanga checkpost",
+        "finding_summary": "Verified 9 PM\u20136 AM Bandipur night ban; 9:30 AM outbound & 1:15 PM return crossings clear with 6h+ buffer."
+      },
+      {
+        "phase": "Phase 2 \u00b7 Multi-Channel Arbitrage",
+        "tool_name": "hotel_rate_arbitrage",
+        "status": "completed",
+        "latency_ms": 280,
+        "input_summary": "Radisson Blu Plaza Mysore \u00b7 Deluxe + Extra Bed \u00b7 Dec 21 & Dec 25 across 4 channels",
+        "finding_summary": "Split-channel win: Radisson Direct (\u20b912,500 Dec 21) + MMT Card Promo (\u20b915,200 Dec 25) saves \u20b94,337."
+      },
+      {
+        "phase": "Phase 2 \u00b7 Multi-Channel Arbitrage",
+        "tool_name": "villa_cross_channel_deduplicator",
+        "status": "pivoted",
+        "latency_ms": 410,
+        "input_summary": "The Blue Kite + Airbnb + StayVista + SaffronStays \u00b7 2 BHK \u00b7 \u20b915,000\u2013\u20b920,000/N",
+        "finding_summary": "Blue Kite=0 in Wayanad -> Pivoted to StayVista & Airbnb; matched 'The Sattva Grove' saving \u20b97,900 direct vs Airbnb."
+      },
+      {
+        "phase": "Phase 3 \u00b7 Spatio-Temporal Solver",
+        "tool_name": "pareto_itinerary_dag_solver",
+        "status": "completed",
+        "latency_ms": 225,
+        "input_summary": "Jointly optimize Vythiri base + Edakkal/Soochipara climb windows + Veg/Non-Veg Kerala dining",
+        "finding_summary": "Generated 3 Pareto blueprints; Vythiri base cuts local hill driving by 45% and dodges \u20b915k Dec 24 Gala fees."
+      }
+    ],
+    "blueprints": [
+      {
+        "id": "bp-wayanad-1",
+        "rank_badge": "Sweet-Spot Recommended",
+        "name": "The Sattva Grove (StayVista) + Radisson Mysore Anchors",
+        "strategy_subtitle": "Max Cross-Channel Arbitrage + Central Climb Base",
+        "recommended": true,
+        "total_core_landed_inr": 86400,
+        "unoptimized_baseline_inr": 98637,
+        "total_arbitrage_savings_inr": 12237,
+        "dining_and_activities_est_inr": 18500,
+        "fatigue_score": 24,
+        "quality_score": 96,
+        "deal_anomaly_score": 94.2,
+        "stays": [
+          {
+            "id": "radisson-mysore-dec21",
+            "name": "Radisson Blu Plaza Hotel Mysore",
+            "subtitle": "Outbound Anchor \u00b7 Mon, Dec 21 (1 Night \u00b7 Weekday Pre-Surge)",
+            "category": "hotel",
+            "city": "Mysuru",
+            "micro_region": "MG Road \u00b7 Chamundi Foothills (NH766 Southern Exit)",
+            "lat": 12.2979,
+            "lng": 76.6667,
+            "rating": 4.6,
+            "review_count": 4820,
+            "bedrooms_label": "Deluxe Room + Rollaway Extra Bed",
+            "check_in": "2026-12-21",
+            "check_out": "2026-12-22",
+            "nights": 1,
+            "image_url": "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=1000&q=80",
+            "suv_access_note": "Valet + spacious paved surface parking for Jeep Meridian; 2 mins from NH766 Nanjangud/Bandipur highway exit.",
+            "kid_fit_note": "Kids aged 8 & 10 qualify under Radisson's <=10 child rule; large outdoor pool facing Chamundi Hills.",
+            "highlights": [
+              "Southern Mysuru location skips 100% of city traffic on Dec 22 morning",
+              "Super Breakfast buffet included; child #2 (<=10 yrs) avoids adult extra-bed tariff",
+              "On-site Spring multi-cuisine dining after 2 PM Bengaluru drive"
+            ],
+            "offers": [
+              {
+                "platform": "Radisson Rewards Direct",
+                "channel_type": "direct_brand",
+                "base_total_inr": 8400,
+                "extra_bed_or_addons_inr": 2200,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 1900,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 12500,
+                "per_night_landed_inr": 12500,
+                "inclusions": [
+                  "Super Breakfast",
+                  "Extra Rollaway Bed",
+                  "Kids <=10 Child Policy"
+                ],
+                "promo_note": "Free Radisson Rewards Member tier (~12% off + direct child breakfast leverage)",
+                "booking_url": "https://www.radissonhotels.com/",
+                "is_best_deal": true
+              },
+              {
+                "platform": "MakeMyTrip",
+                "channel_type": "ota",
+                "base_total_inr": 9100,
+                "extra_bed_or_addons_inr": 2500,
+                "platform_or_cleaning_fee_inr": 380,
+                "taxes_gst_inr": 2088,
+                "promo_discount_inr": 1400,
+                "landed_total_inr": 12668,
+                "per_night_landed_inr": 12668,
+                "inclusions": [
+                  "Breakfast",
+                  "Extra Bed"
+                ],
+                "promo_note": "MMTBLACK + HDFC/ICICI instant card discount applied",
+                "booking_url": "https://www.makemytrip.com/hotels/",
+                "is_best_deal": false
+              },
+              {
+                "platform": "Agoda",
+                "channel_type": "ota",
+                "base_total_inr": 9200,
+                "extra_bed_or_addons_inr": 2500,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 2106,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 13806,
+                "per_night_landed_inr": 13806,
+                "inclusions": [
+                  "Breakfast Add-on",
+                  "Extra Bed"
+                ],
+                "promo_note": "Base rate excludes breakfast by default; all-in rises at checkout",
+                "booking_url": "https://www.agoda.com/",
+                "is_best_deal": false
+              },
+              {
+                "platform": "Booking.com",
+                "channel_type": "ota",
+                "base_total_inr": 9450,
+                "extra_bed_or_addons_inr": 2500,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 2151,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 14101,
+                "per_night_landed_inr": 14101,
+                "inclusions": [
+                  "Breakfast",
+                  "Extra Bed",
+                  "Free Cancellation Window"
+                ],
+                "promo_note": "Genius Level 2 priced with 18% luxury hotel GST slab",
+                "booking_url": "https://www.booking.com/",
+                "is_best_deal": false
+              }
+            ],
+            "best_channel": "Radisson Rewards Direct",
+            "best_landed_inr": 12500,
+            "worst_landed_inr": 14101,
+            "savings_inr": 1601,
+            "deal_anomaly_score": 87.5,
+            "anomaly_badge": "Age-10 Child Cutoff Arbitrage"
+          },
+          {
+            "id": "wayanad-sattva-grove",
+            "name": "The Sattva Grove (StayVista)",
+            "subtitle": "Vythiri \u00b7 Chembra Peak View \u00b7 2 BHK Laterite Twin Villa w/ Pool",
+            "category": "villa",
+            "city": "Wayanad",
+            "micro_region": "Vythiri \u2013 Meppadi Corridor (Central-South Sweet Spot)",
+            "lat": 11.5515,
+            "lng": 76.041,
+            "rating": 4.88,
+            "review_count": 142,
+            "bedrooms_label": "2 BHK Private Twin Cottages + Lawn + Pool",
+            "check_in": "2026-12-22",
+            "check_out": "2026-12-25",
+            "nights": 3,
+            "image_url": "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=1000&q=80",
+            "suv_access_note": "Steep last 350m plantation climb \u2014 effortless for your Jeep Meridian SUV's 203mm clearance.",
+            "kid_fit_note": "Expansive private lawn, swimming pool facing Chembra Peak, indoor board games, and dedicated caretaker/cook.",
+            "highlights": [
+              "Central Vythiri-Meppadi base cuts daily driving to Edakkal & Soochipara by ~45%",
+              "Booking StayVista Direct strips \u20b97,900 in Airbnb guest service fees across 3 nights",
+              "Complimentary hot breakfast + custom Christmas Eve garden bonfire & BBQ setup"
+            ],
+            "offers": [
+              {
+                "platform": "StayVista Direct",
+                "channel_type": "villa_portal",
+                "base_total_inr": 46500,
+                "extra_bed_or_addons_inr": 0,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 8370,
+                "promo_discount_inr": 2970,
+                "landed_total_inr": 51900,
+                "per_night_landed_inr": 17300,
+                "inclusions": [
+                  "Complimentary Breakfast (4 Guests)",
+                  "Caretaker",
+                  "Pool & Lawn"
+                ],
+                "promo_note": "Direct portal promo + zero Airbnb 14.2% guest service fee",
+                "booking_url": "https://www.stayvista.com/",
+                "is_best_deal": true
+              },
+              {
+                "platform": "MakeMyTrip Villas",
+                "channel_type": "ota",
+                "base_total_inr": 48000,
+                "extra_bed_or_addons_inr": 0,
+                "platform_or_cleaning_fee_inr": 950,
+                "taxes_gst_inr": 8640,
+                "promo_discount_inr": 2990,
+                "landed_total_inr": 54600,
+                "per_night_landed_inr": 18200,
+                "inclusions": [
+                  "Complimentary Breakfast",
+                  "Caretaker"
+                ],
+                "promo_note": "Homestay festive card offer applied",
+                "booking_url": "https://www.makemytrip.com/homestays/",
+                "is_best_deal": false
+              },
+              {
+                "platform": "Airbnb",
+                "channel_type": "airbnb",
+                "base_total_inr": 49500,
+                "extra_bed_or_addons_inr": 0,
+                "platform_or_cleaning_fee_inr": 7120,
+                "taxes_gst_inr": 3180,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 59800,
+                "per_night_landed_inr": 19933,
+                "inclusions": [
+                  "Entire 2-Bedroom Villa",
+                  "Pool"
+                ],
+                "promo_note": "Same property syndicated to Airbnb + ~14.2% Airbnb guest service fee",
+                "booking_url": "https://www.airbnb.co.in/",
+                "is_best_deal": false
+              }
+            ],
+            "best_channel": "StayVista Direct",
+            "best_landed_inr": 51900,
+            "worst_landed_inr": 59800,
+            "savings_inr": 7900,
+            "deal_anomaly_score": 94.2,
+            "anomaly_badge": "Saves \u20b97,900 vs. Airbnb Same-Villa Listing"
+          },
+          {
+            "id": "radisson-mysore-dec25",
+            "name": "Radisson Blu Plaza Hotel Mysore",
+            "subtitle": "Return Anchor \u00b7 Fri, Dec 25 (1 Night \u00b7 Christmas Peak)",
+            "category": "hotel",
+            "city": "Mysuru",
+            "micro_region": "MG Road \u00b7 Chamundi Foothills",
+            "lat": 12.2979,
+            "lng": 76.6667,
+            "rating": 4.6,
+            "review_count": 4820,
+            "bedrooms_label": "Deluxe Room + Rollaway Extra Bed",
+            "check_in": "2026-12-25",
+            "check_out": "2026-12-26",
+            "nights": 1,
+            "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=1000&q=80",
+            "suv_access_note": "Easy 4:30 PM arrival from Bandipur; quick access to NH275 Expressway after lunch on Dec 26.",
+            "kid_fit_note": "Festive Christmas evening ambiance & buffet without needing to drive into crowded Mysuru Palace zones.",
+            "highlights": [
+              "Dodges mandatory Dec 24 Christmas Eve 5-star Gala surcharge (~\u20b915k family savings!)",
+              "Bank-card OTA promo beats peak rack rate by \u20b92,700 on Dec 25",
+              "12:00 PM checkout pairs with leisurely Mysuru lunch before NH275 cruise"
+            ],
+            "offers": [
+              {
+                "platform": "MakeMyTrip",
+                "channel_type": "ota",
+                "base_total_inr": 11800,
+                "extra_bed_or_addons_inr": 2600,
+                "platform_or_cleaning_fee_inr": 420,
+                "taxes_gst_inr": 2592,
+                "promo_discount_inr": 2212,
+                "landed_total_inr": 15200,
+                "per_night_landed_inr": 15200,
+                "inclusions": [
+                  "Super Breakfast",
+                  "Extra Bed",
+                  "No Mandatory Gala Fee"
+                ],
+                "promo_note": "Peak Christmas Friday surge offset via \u20b92,212 HDFC/ICICI festive instant discount",
+                "booking_url": "https://www.makemytrip.com/hotels/",
+                "is_best_deal": true
+              },
+              {
+                "platform": "Radisson Rewards Direct",
+                "channel_type": "direct_brand",
+                "base_total_inr": 10900,
+                "extra_bed_or_addons_inr": 2500,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 2412,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 15812,
+                "per_night_landed_inr": 15812,
+                "inclusions": [
+                  "Super Breakfast",
+                  "Extra Rollaway Bed"
+                ],
+                "promo_note": "Member direct rate without third-party convenience fee",
+                "booking_url": "https://www.radissonhotels.com/",
+                "is_best_deal": false
+              },
+              {
+                "platform": "Agoda",
+                "channel_type": "ota",
+                "base_total_inr": 12600,
+                "extra_bed_or_addons_inr": 2600,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 2736,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 17936,
+                "per_night_landed_inr": 17936,
+                "inclusions": [
+                  "Breakfast",
+                  "Extra Bed"
+                ],
+                "promo_note": "Christmas peak dynamic pricing",
+                "booking_url": "https://www.agoda.com/",
+                "is_best_deal": false
+              }
+            ],
+            "best_channel": "MakeMyTrip",
+            "best_landed_inr": 15200,
+            "worst_landed_inr": 17936,
+            "savings_inr": 2736,
+            "deal_anomaly_score": 91.0,
+            "anomaly_badge": "Dodges Dec 24 Gala Surcharge"
+          }
+        ],
+        "flights": [],
+        "road": {
+          "vehicle": "Jeep Meridian SUV (Own Car)",
+          "ground_clearance_mm": 203,
+          "total_distance_km": 740.0,
+          "total_drive_hours": 17.6,
+          "estimated_fuel_liters": 59.5,
+          "fuel_cost_inr": 5550,
+          "fastag_and_forest_tolls_inr": 1250,
+          "rental_car_cost_inr": 0,
+          "total_road_cost_inr": 6800,
+          "corridor_notes": [
+            "Exit Koramangala via Electronic City NICE Ramp at 2:00 PM to bypass city Mysore Rd bottlenecks.",
+            "Radisson Blu Mysore sits on the southern NH766 exit \u2014 saves 35 mins of Mysuru inner-city traffic on Dec 22.",
+            "Strict 40 km/h speed limit & zero-stopping rule inside 30 km Bandipur\u2013Muthanga forest stretch."
+          ],
+          "segments": [
+            {
+              "id": "seg-day1-blr-mys",
+              "day_number": 1,
+              "from_name": "Koramangala, Bengaluru",
+              "to_name": "Radisson Blu Plaza Hotel Mysore",
+              "highway_label": "NICE Road -> NH275 Bengaluru\u2013Mysuru Access-Controlled Expressway",
+              "distance_km": 162.0,
+              "duration_mins": 195,
+              "fastag_toll_inr": 534,
+              "fuel_estimate_inr": 1180,
+              "gate_alert": null,
+              "coordinates": [
+                [
+                  77.6245,
+                  12.9352
+                ],
+                [
+                  77.6229,
+                  12.9172
+                ],
+                [
+                  77.6598,
+                  12.849
+                ],
+                [
+                  77.547,
+                  12.863
+                ],
+                [
+                  77.4662,
+                  12.8975
+                ],
+                [
+                  77.281,
+                  12.715
+                ],
+                [
+                  76.8958,
+                  12.5218
+                ],
+                [
+                  76.698,
+                  12.356
+                ],
+                [
+                  76.6667,
+                  12.2979
+                ]
+              ]
+            },
+            {
+              "id": "seg-day2-mys-wayanad",
+              "day_number": 2,
+              "from_name": "Radisson Blu Plaza Hotel Mysore",
+              "to_name": "Vythiri / Kalpetta Villa Base, Wayanad",
+              "highway_label": "NH766 (Nanjangud -> Gundlupet -> Bandipur -> Muthanga -> Sultan Bathery)",
+              "distance_km": 138.0,
+              "duration_mins": 210,
+              "fastag_toll_inr": 90,
+              "fuel_estimate_inr": 1080,
+              "gate_alert": "NH766 Bandipur\u2013Muthanga Tiger Reserve Night Ban (9:00 PM \u2013 6:00 AM). Your 9:30 AM departure crosses smoothly ~10:45\u201311:45 AM.",
+              "coordinates": [
+                [
+                  76.6667,
+                  12.2979
+                ],
+                [
+                  76.682,
+                  12.12
+                ],
+                [
+                  76.6895,
+                  11.8082
+                ],
+                [
+                  76.6345,
+                  11.6662
+                ],
+                [
+                  76.3712,
+                  11.6695
+                ],
+                [
+                  76.257,
+                  11.665
+                ],
+                [
+                  76.132,
+                  11.6854
+                ],
+                [
+                  76.0825,
+                  11.6103
+                ],
+                [
+                  76.041,
+                  11.5515
+                ]
+              ]
+            },
+            {
+              "id": "seg-day3-4-wayanad-local",
+              "day_number": 3,
+              "from_name": "Vythiri Villa Base",
+              "to_name": "Edakkal \u00b7 Phantom Rock \u00b7 Soochipara \u00b7 En Ooru Loop",
+              "highway_label": "Wayanad Ghat & Tea-Estate Corridors (Days 3 & 4 Combined)",
+              "distance_km": 140.0,
+              "duration_mins": 255,
+              "fastag_toll_inr": 0,
+              "fuel_estimate_inr": 1230,
+              "gate_alert": "Steep plantation & Meppadi hill gradients \u2014 ideal for Jeep Meridian 2.0L Diesel torque & 203mm clearance.",
+              "coordinates": [
+                [
+                  76.041,
+                  11.5515
+                ],
+                [
+                  76.2345,
+                  11.6265
+                ],
+                [
+                  76.2055,
+                  11.6378
+                ],
+                [
+                  76.1365,
+                  11.568
+                ],
+                [
+                  76.1632,
+                  11.5122
+                ],
+                [
+                  76.1342,
+                  11.554
+                ],
+                [
+                  76.0235,
+                  11.5342
+                ],
+                [
+                  76.041,
+                  11.5515
+                ]
+              ]
+            },
+            {
+              "id": "seg-day5-wayanad-mys",
+              "day_number": 5,
+              "from_name": "Vythiri / Sultan Bathery, Wayanad",
+              "to_name": "Radisson Blu Plaza Hotel Mysore",
+              "highway_label": "NH766 (Muthanga -> Bandipur Daylight Return -> Gundlupet)",
+              "distance_km": 138.0,
+              "duration_mins": 205,
+              "fastag_toll_inr": 90,
+              "fuel_estimate_inr": 1040,
+              "gate_alert": "Early-afternoon departure (~1:15 PM post-lunch) clears Bandipur gate ~2:45 PM with 6+ hours of daylight buffer.",
+              "coordinates": [
+                [
+                  76.041,
+                  11.5515
+                ],
+                [
+                  76.0825,
+                  11.6103
+                ],
+                [
+                  76.132,
+                  11.6854
+                ],
+                [
+                  76.257,
+                  11.665
+                ],
+                [
+                  76.3712,
+                  11.6695
+                ],
+                [
+                  76.6345,
+                  11.6662
+                ],
+                [
+                  76.6895,
+                  11.8082
+                ],
+                [
+                  76.682,
+                  12.12
+                ],
+                [
+                  76.6667,
+                  12.2979
+                ]
+              ]
+            },
+            {
+              "id": "seg-day6-mys-blr",
+              "day_number": 6,
+              "from_name": "Radisson Blu Plaza Hotel Mysore",
+              "to_name": "Koramangala, Bengaluru",
+              "highway_label": "NH275 Expressway -> NICE Road -> Electronic City Ramp",
+              "distance_km": 162.0,
+              "duration_mins": 195,
+              "fastag_toll_inr": 534,
+              "fuel_estimate_inr": 1020,
+              "gate_alert": null,
+              "coordinates": [
+                [
+                  76.6667,
+                  12.2979
+                ],
+                [
+                  76.698,
+                  12.356
+                ],
+                [
+                  76.8958,
+                  12.5218
+                ],
+                [
+                  77.281,
+                  12.715
+                ],
+                [
+                  77.4662,
+                  12.8975
+                ],
+                [
+                  77.547,
+                  12.863
+                ],
+                [
+                  77.6598,
+                  12.849
+                ],
+                [
+                  77.6229,
+                  12.9172
+                ],
+                [
+                  77.6245,
+                  12.9352
+                ]
+              ]
+            }
+          ]
+        },
+        "arbitrage_callouts": [
+          "The Sattva Grove (StayVista): \u20b917,300/night all-in via StayVista Direct (within \u20b915k\u2013\u20b920k target).",
+          "Same-Property Fee Stripping: Booking The Sattva Grove (StayVista) via StayVista Direct saves \u20b97,900 vs. Airbnb's ~14.2% service fee.",
+          "Dec 24 Villa vs. 5-Star Resort Arbitrage: Staying in a private villa on Christmas Eve dodges \u20b912,000\u2013\u20b918,000 in mandatory 5-star Gala Dinner surcharges.",
+          "Radisson Blu Mysore Split-Channel Booking: Member Direct on Mon Dec 21 (\u20b912,500) + MMT Festive Card Offer on Fri Dec 25 (\u20b915,200) saves \u20b94,337."
+        ],
+        "days": [
+          {
+            "day_number": 1,
+            "date_label": "Mon, Dec 21",
+            "weekday": "Monday",
+            "headline": "2 PM Koramangala Rollout -> Radisson Blu Mysore Rest Anchor",
+            "corridor_tag": "NH275 Expressway \u00b7 162 km",
+            "drive_km": 162.0,
+            "drive_time_label": "3h 15m",
+            "overnight_label": "Radisson Blu Plaza Hotel Mysore",
+            "stops": [
+              {
+                "id": "d1-s1",
+                "time_window": "2:00 PM \u2013 5:15 PM",
+                "title": "Expressway Cruise: Koramangala -> Mysuru",
+                "location_label": "NICE Road -> NH275 Bengaluru\u2013Mysuru Expressway (162 km)",
+                "category": "drive",
+                "lat": 12.715,
+                "lng": 77.281,
+                "duration_label": "3h 15m",
+                "description": "Roll out of Koramangala at 2:00 PM via Electronic City ramp onto NICE Road -> Cloverleaf -> NH275 Expressway -> Mysuru Outer Ring Road East.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": "FASTag auto-deducts \u20b9164 (NICE) + \u20b9370 (Kaniminike & Gananguru NH275 plazas)."
+              },
+              {
+                "id": "d1-s2",
+                "time_window": "5:15 PM",
+                "title": "Check-in & Pool Unwind at Radisson Blu Plaza Mysore",
+                "location_label": "MG Road \u00b7 Race Course / Chamundi Foothills",
+                "category": "stay",
+                "lat": 12.2979,
+                "lng": 76.6667,
+                "duration_label": "Overnight (Deluxe + Extra Bed)",
+                "description": "Relaxed hotel evening with Chamundi Hills view pool \u2014 zero city sightseeing detours as requested.",
+                "dietary_note": null,
+                "kid_note": "Kids aged 8 & 10 unwind at the pool after the 3-hour drive.",
+                "insider_tip": null
+              },
+              {
+                "id": "d1-s3",
+                "time_window": "7:30 PM",
+                "title": "Family Dinner at Spring (Radisson On-Site)",
+                "location_label": "Radisson Blu Plaza Hotel Mysore",
+                "category": "dining",
+                "lat": 12.2979,
+                "lng": 76.6667,
+                "duration_label": "1h 30m",
+                "description": "Effortless multi-cuisine buffet & live grills right inside the hotel so nobody steps back into traffic.",
+                "dietary_note": "Full Veg + Non-Veg spread (South Indian, kebabs, pastas, desserts).",
+                "kid_note": null,
+                "insider_tip": null
+              }
+            ]
+          },
+          {
+            "day_number": 2,
+            "date_label": "Tue, Dec 22",
+            "weekday": "Tuesday",
+            "headline": "Bandipur Forest Canopy Drive -> Wayanad Coffee-Estate Villa",
+            "corridor_tag": "NH766 Forest Corridor \u00b7 138 km",
+            "drive_km": 138.0,
+            "drive_time_label": "3h 30m",
+            "overnight_label": "The Sattva Grove (StayVista)",
+            "stops": [
+              {
+                "id": "d2-s1",
+                "time_window": "9:30 AM \u2013 12:15 PM",
+                "title": "Morning Forest Corridor Drive: Mysuru -> Sultan Bathery",
+                "location_label": "NH766 \u00b7 Bandipur & Muthanga Tiger Reserves (115 km)",
+                "category": "drive",
+                "lat": 11.6662,
+                "lng": 76.6345,
+                "duration_label": "2h 45m",
+                "description": "After Radisson's Super Breakfast, exit southern Mysuru straight onto NH766. Cruise slowly through 30 km of Bandipur\u2013Muthanga forest canopy.",
+                "dietary_note": null,
+                "kid_note": "High Jeep Meridian windows give effortless roadside sightings of spotted deer, peacocks, langurs, and wild elephants \u2014 no formal safari required.",
+                "insider_tip": "Keep speed <=40 km/h over forest humps; stopping or feeding wildlife is strictly fined."
+              },
+              {
+                "id": "d2-s2",
+                "time_window": "12:15 PM \u2013 1:20 PM",
+                "title": "Highway Family Lunch at The Wilton Restaurant",
+                "location_label": "Sultan Bathery (Right on NH766)",
+                "category": "dining",
+                "lat": 11.665,
+                "lng": 76.257,
+                "duration_label": "1h 05m",
+                "description": "Spacious, spotless AC family landmark right as you enter Wayanad.",
+                "dietary_note": "Must-order: Malabar Chicken/Mutton Biryani, Tawa Fish Fry, and crisp North/South Indian Veg platters.",
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d2-s3",
+                "time_window": "2:00 PM",
+                "title": "Check-in at The Sattva Grove (StayVista)",
+                "location_label": "Vythiri \u2013 Meppadi Corridor (Central-South Sweet Spot)",
+                "category": "stay",
+                "lat": 11.5515,
+                "lng": 76.041,
+                "duration_label": "3-Night Family Base",
+                "description": "Settle into your 2 BHK villa. Kids get room to roam, swim, and play board games.",
+                "dietary_note": null,
+                "kid_note": "Expansive private lawn, swimming pool facing Chembra Peak, indoor board games, and dedicated caretaker/cook.",
+                "insider_tip": null
+              },
+              {
+                "id": "d2-s4",
+                "time_window": "4:30 PM \u2013 6:00 PM",
+                "title": "Guided Coffee, Black Pepper & Cardamom Estate Walk",
+                "location_label": "On-Estate Plantation Trails",
+                "category": "nature",
+                "lat": 11.5555,
+                "lng": 76.045,
+                "duration_label": "1h 30m",
+                "description": "Easy first-evening plantation stroll seeing Arabica/Robusta coffee berries, pepper vines, and cocoa pods, followed by homestyle Kerala dinner at the villa.",
+                "dietary_note": "Villa dinner: Hot Appams + Vegetable Stew + Nadan Chicken Roast.",
+                "kid_note": null,
+                "insider_tip": null
+              }
+            ]
+          },
+          {
+            "day_number": 3,
+            "date_label": "Wed, Dec 23",
+            "weekday": "Wednesday",
+            "headline": "Edakkal Stone-Age Climb, Phantom Rock & 1980's Kerala Feast",
+            "corridor_tag": "Ambalavayal \u2013 Kalpetta Loop \u00b7 72 km",
+            "drive_km": 72.0,
+            "drive_time_label": "2h 05m total",
+            "overnight_label": "The Sattva Grove (StayVista)",
+            "stops": [
+              {
+                "id": "d3-s1",
+                "time_window": "9:15 AM \u2013 11:30 AM",
+                "title": "Moderate Climb #1: Edakkal Caves (Neolithic Petroglyphs)",
+                "location_label": "Ambukuthi Mala, Ambalavayal",
+                "category": "climb",
+                "lat": 11.6265,
+                "lng": 76.2345,
+                "duration_label": "2h 15m",
+                "description": "Steep paved hill walk + ~300 rock-cut steps and iron ladders wedged between giant split boulders revealing 6,000-year-old Stone Age carvings.",
+                "dietary_note": null,
+                "kid_note": "Thrilling boulder-cleft climb for ages 8 & 10 with panoramic Wayanad plateau views at the top.",
+                "insider_tip": "Arriving by 9:15 AM beats Christmas-week ticket queues by 60+ minutes and avoids midday sun."
+              },
+              {
+                "id": "d3-s2",
+                "time_window": "11:45 AM \u2013 12:30 PM",
+                "title": "Short Rock Scramble: Phantom Rock (Cheengeri Mala)",
+                "location_label": "Ambalavayal (15 mins from Edakkal)",
+                "category": "climb",
+                "lat": 11.6378,
+                "lng": 76.2055,
+                "duration_label": "45m",
+                "description": "Natural skull-shaped metamorphic rock formation with gentle, grippy boulder slabs and sweeping valley breezes.",
+                "dietary_note": null,
+                "kid_note": "Easy 20-minute scramble with great family photo vantage points.",
+                "insider_tip": null
+              },
+              {
+                "id": "d3-s3",
+                "time_window": "1:15 PM \u2013 2:30 PM",
+                "title": "Signature Kerala Feast at 1980's \u2013 A Nostalgic Restaurant",
+                "location_label": "Kalpetta / Meppadi",
+                "category": "dining",
+                "lat": 11.5882,
+                "lng": 76.0915,
+                "duration_label": "1h 15m",
+                "description": "Set inside a vintage Kerala ancestral home with 80s memorabilia and warm family hospitality.",
+                "dietary_note": "Veg + Non-Veg: Banana-leaf Kerala Sadhya meals, Meen Pollichathu (fish roasted in banana leaf), Nadan Chicken Curry, Prawn Roast & Sulaimani tea.",
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d3-s4",
+                "time_window": "3:00 PM \u2013 4:15 PM",
+                "title": "Uravu Indigenous Bamboo Craft Village",
+                "location_label": "Thrikkaipetta",
+                "category": "heritage",
+                "lat": 11.568,
+                "lng": 76.1365,
+                "duration_label": "1h 15m",
+                "description": "Calm open-air artisan centre where kids watch craftspeople turn giant Wayanad bamboo into architecture, toys, and puzzles \u2014 zero theme-park crowds.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": "Pick up hand-carved bamboo brain-teaser puzzles for the kids for the drive home."
+              }
+            ]
+          },
+          {
+            "day_number": 4,
+            "date_label": "Thu, Dec 24",
+            "weekday": "Christmas Eve",
+            "headline": "Soochipara Waterfall Steps, Tea Ridges, En Ooru & Villa BBQ",
+            "corridor_tag": "Meppadi \u2013 Lakkidi Loop \u00b7 68 km",
+            "drive_km": 68.0,
+            "drive_time_label": "2h 00m total",
+            "overnight_label": "The Sattva Grove (StayVista)",
+            "stops": [
+              {
+                "id": "d4-s1",
+                "time_window": "9:00 AM \u2013 11:30 AM",
+                "title": "Moderate Climb #2: Soochipara (Sentinel Rock) Waterfalls",
+                "location_label": "Meppadi Forest Range",
+                "category": "climb",
+                "lat": 11.5122,
+                "lng": 76.1632,
+                "duration_label": "2h 30m",
+                "description": "Scenic ~1.2 km stone-stepped forest descent & climb back up (25 mins each way through tea estates and deciduous canopy) to a dramatic 200-ft 3-tiered waterfall.",
+                "dietary_note": null,
+                "kid_note": "Great leg-stretching forest step climb (no water rides). Lighter backup 15 mins away: Kanthanpara Waterfalls.",
+                "insider_tip": "Carry reusable metal water bottles \u2014 forest checkpost prohibits single-use plastic bottles."
+              },
+              {
+                "id": "d4-s2",
+                "time_window": "11:45 AM \u2013 12:45 PM",
+                "title": "Meppadi & Arapetta Tea-Estate Ridge Walk",
+                "location_label": "Ripon / Meppadi Tea Hills",
+                "category": "nature",
+                "lat": 11.554,
+                "lng": 76.1342,
+                "duration_label": "1h 00m",
+                "description": "Gentle walk along manicured green tea-picker ridges framed by mist-draped Chembra Peak.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d4-s3",
+                "time_window": "1:15 PM \u2013 2:30 PM",
+                "title": "Rustic Village Lunch at ClayHut Restaurant",
+                "location_label": "Kalpetta Bypass",
+                "category": "dining",
+                "lat": 11.604,
+                "lng": 76.0835,
+                "duration_label": "1h 15m",
+                "description": "Cozy open-air clay and bamboo huts tucked inside lush greenery.",
+                "dietary_note": "Homestyle Kerala Veg curries, coconut-oil tawa fish fry, country chicken roast & flaky Malabar parottas.",
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d4-s4",
+                "time_window": "3:15 PM \u2013 4:45 PM",
+                "title": "En Ooru Tribal Heritage Village & Lakkidi Viewpoint",
+                "location_label": "Pookode / Lakkidi Ghat Crest",
+                "category": "heritage",
+                "lat": 11.5342,
+                "lng": 76.0235,
+                "duration_label": "1h 30m",
+                "description": "Walk an open-air hilltop tribal hamlet showcasing indigenous mud-and-thatch architecture, tribal crafts, and sweeping valley vistas, ending with sunset over Thamarassery Ghat.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": "7:30 PM Christmas Eve back at your private villa: pre-order a garden bonfire + Veg/Chicken/Fish BBQ under the stars."
+              }
+            ]
+          },
+          {
+            "day_number": 5,
+            "date_label": "Fri, Dec 25",
+            "weekday": "Christmas Day",
+            "headline": "Slow Villa Morning -> Early-Afternoon Return to Radisson Mysore",
+            "corridor_tag": "NH766 Daylight Return \u00b7 138 km",
+            "drive_km": 138.0,
+            "drive_time_label": "3h 25m",
+            "overnight_label": "Radisson Blu Plaza Hotel Mysore",
+            "stops": [
+              {
+                "id": "d5-s1",
+                "time_window": "8:30 AM \u2013 11:30 AM",
+                "title": "Unhurried Christmas Morning at the Villa",
+                "location_label": "The Sattva Grove (StayVista)",
+                "category": "stay",
+                "lat": 11.5515,
+                "lng": 76.041,
+                "duration_label": "Morning",
+                "description": "Sleep in, enjoy slow Christmas breakfast on the veranda, one final dip in the pool, and pack at an easy family pace.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d5-s2",
+                "time_window": "12:15 PM \u2013 1:15 PM",
+                "title": "Early-Afternoon Return Lunch at Mathai's Restocafe",
+                "location_label": "Sultan Bathery",
+                "category": "dining",
+                "lat": 11.662,
+                "lng": 76.261,
+                "duration_label": "1h 00m",
+                "description": "Airy modern family restocafe right on NH766 before entering the forest checkpost.",
+                "dietary_note": "Pastas/continental kid favorites alongside Kerala Veg & Non-Veg specials (Alt: Hotel Udupi for crisp dosas).",
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d5-s3",
+                "time_window": "1:15 PM \u2013 4:30 PM",
+                "title": "Daylight Forest Drive Back to Radisson Blu Mysore",
+                "location_label": "Sultan Bathery -> Muthanga -> Bandipur -> Mysuru (115 km)",
+                "category": "drive",
+                "lat": 11.8082,
+                "lng": 76.6895,
+                "duration_label": "3h 15m",
+                "description": "Cross Muthanga & Bandipur ~1:35\u20132:45 PM in bright daylight, pulling into Radisson Blu Plaza Mysore by 4:30 PM for a festive Christmas evening buffet & deep rest.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              }
+            ]
+          },
+          {
+            "day_number": 6,
+            "date_label": "Sat, Dec 26",
+            "weekday": "Saturday",
+            "headline": "Unhurried Mysuru Lunch -> Afternoon Cruise Home to Koramangala",
+            "corridor_tag": "NH275 Expressway \u00b7 162 km",
+            "drive_km": 162.0,
+            "drive_time_label": "3h 15m",
+            "overnight_label": "Home \u00b7 Koramangala",
+            "stops": [
+              {
+                "id": "d6-s1",
+                "time_window": "8:30 AM \u2013 12:00 PM",
+                "title": "Lazy Radisson Morning & Super Breakfast",
+                "location_label": "Radisson Blu Plaza Hotel Mysore",
+                "category": "stay",
+                "lat": 12.2979,
+                "lng": 76.6667,
+                "duration_label": "Morning",
+                "description": "Sleep in, enjoy the full breakfast spread and pool/lounge, and check out at 12:00 PM.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d6-s2",
+                "time_window": "12:30 PM \u2013 1:45 PM",
+                "title": "Farewell Lunch at The Old House (or Hotel RRR)",
+                "location_label": "Mysuru (Zero-Sightseeing Culinary Stop, 7 mins away)",
+                "category": "dining",
+                "lat": 12.3095,
+                "lng": 76.649,
+                "duration_label": "1h 15m",
+                "description": "Leafy heritage bungalow cafe serving wood-fired pizzas, handmade pastas & salads kids love \u2014 or pick Hotel RRR for iconic banana-leaf biryani & veg meals.",
+                "dietary_note": "Both Veg & Non-Veg; light and comfortable right before the afternoon highway run.",
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d6-s3",
+                "time_window": "2:00 PM \u2013 5:15 PM",
+                "title": "Post-Lunch Expressway Return to Koramangala",
+                "location_label": "NH275 Expressway -> NICE Road -> Electronic City -> Koramangala",
+                "category": "drive",
+                "lat": 12.9352,
+                "lng": 77.6245,
+                "duration_label": "3h 15m",
+                "description": "Smooth Saturday afternoon cruise back home on NH275, arriving in Koramangala by ~5:15\u20135:30 PM.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "bp-wayanad-2",
+        "rank_badge": "Pure Coffee-Estate Airbnb",
+        "name": "Wayanad Pearls Private Pool Villa + Radisson Mysore Anchors",
+        "strategy_subtitle": "10-Acre Working Plantation Chalet + Kottur Stream",
+        "recommended": false,
+        "total_core_landed_inr": 83400,
+        "unoptimized_baseline_inr": 92237,
+        "total_arbitrage_savings_inr": 8837,
+        "dining_and_activities_est_inr": 18500,
+        "fatigue_score": 26,
+        "quality_score": 93,
+        "deal_anomaly_score": 90.4,
+        "stays": [
+          {
+            "id": "radisson-mysore-dec21",
+            "name": "Radisson Blu Plaza Hotel Mysore",
+            "subtitle": "Outbound Anchor \u00b7 Mon, Dec 21 (1 Night \u00b7 Weekday Pre-Surge)",
+            "category": "hotel",
+            "city": "Mysuru",
+            "micro_region": "MG Road \u00b7 Chamundi Foothills (NH766 Southern Exit)",
+            "lat": 12.2979,
+            "lng": 76.6667,
+            "rating": 4.6,
+            "review_count": 4820,
+            "bedrooms_label": "Deluxe Room + Rollaway Extra Bed",
+            "check_in": "2026-12-21",
+            "check_out": "2026-12-22",
+            "nights": 1,
+            "image_url": "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=1000&q=80",
+            "suv_access_note": "Valet + spacious paved surface parking for Jeep Meridian; 2 mins from NH766 Nanjangud/Bandipur highway exit.",
+            "kid_fit_note": "Kids aged 8 & 10 qualify under Radisson's <=10 child rule; large outdoor pool facing Chamundi Hills.",
+            "highlights": [
+              "Southern Mysuru location skips 100% of city traffic on Dec 22 morning",
+              "Super Breakfast buffet included; child #2 (<=10 yrs) avoids adult extra-bed tariff",
+              "On-site Spring multi-cuisine dining after 2 PM Bengaluru drive"
+            ],
+            "offers": [
+              {
+                "platform": "Radisson Rewards Direct",
+                "channel_type": "direct_brand",
+                "base_total_inr": 8400,
+                "extra_bed_or_addons_inr": 2200,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 1900,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 12500,
+                "per_night_landed_inr": 12500,
+                "inclusions": [
+                  "Super Breakfast",
+                  "Extra Rollaway Bed",
+                  "Kids <=10 Child Policy"
+                ],
+                "promo_note": "Free Radisson Rewards Member tier (~12% off + direct child breakfast leverage)",
+                "booking_url": "https://www.radissonhotels.com/",
+                "is_best_deal": true
+              },
+              {
+                "platform": "MakeMyTrip",
+                "channel_type": "ota",
+                "base_total_inr": 9100,
+                "extra_bed_or_addons_inr": 2500,
+                "platform_or_cleaning_fee_inr": 380,
+                "taxes_gst_inr": 2088,
+                "promo_discount_inr": 1400,
+                "landed_total_inr": 12668,
+                "per_night_landed_inr": 12668,
+                "inclusions": [
+                  "Breakfast",
+                  "Extra Bed"
+                ],
+                "promo_note": "MMTBLACK + HDFC/ICICI instant card discount applied",
+                "booking_url": "https://www.makemytrip.com/hotels/",
+                "is_best_deal": false
+              },
+              {
+                "platform": "Agoda",
+                "channel_type": "ota",
+                "base_total_inr": 9200,
+                "extra_bed_or_addons_inr": 2500,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 2106,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 13806,
+                "per_night_landed_inr": 13806,
+                "inclusions": [
+                  "Breakfast Add-on",
+                  "Extra Bed"
+                ],
+                "promo_note": "Base rate excludes breakfast by default; all-in rises at checkout",
+                "booking_url": "https://www.agoda.com/",
+                "is_best_deal": false
+              },
+              {
+                "platform": "Booking.com",
+                "channel_type": "ota",
+                "base_total_inr": 9450,
+                "extra_bed_or_addons_inr": 2500,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 2151,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 14101,
+                "per_night_landed_inr": 14101,
+                "inclusions": [
+                  "Breakfast",
+                  "Extra Bed",
+                  "Free Cancellation Window"
+                ],
+                "promo_note": "Genius Level 2 priced with 18% luxury hotel GST slab",
+                "booking_url": "https://www.booking.com/",
+                "is_best_deal": false
+              }
+            ],
+            "best_channel": "Radisson Rewards Direct",
+            "best_landed_inr": 12500,
+            "worst_landed_inr": 14101,
+            "savings_inr": 1601,
+            "deal_anomaly_score": 87.5,
+            "anomaly_badge": "Age-10 Child Cutoff Arbitrage"
+          },
+          {
+            "id": "wayanad-pearls-pool-villa",
+            "name": "Wayanad Pearls Private Pool Villa",
+            "subtitle": "Vythiri Hills \u00b7 100% Private Family Pool \u00b7 2 BHK Forested Retreat",
+            "category": "villa",
+            "city": "Wayanad",
+            "micro_region": "Old Vythiri (5 mins from En Ooru & Lakkidi)",
+            "lat": 11.539,
+            "lng": 76.0285,
+            "rating": 4.85,
+            "review_count": 118,
+            "bedrooms_label": "2 BHK Villa + Exclusive Private Plunge Pool + Kitchen",
+            "check_in": "2026-12-22",
+            "check_out": "2026-12-25",
+            "nights": 3,
+            "image_url": "https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=1000&q=80",
+            "suv_access_note": "Tarmac + short paved hill incline directly off NH766 Vythiri stretch.",
+            "kid_fit_note": "100% private pool just for the 4 of you (not shared), full kitchen, misty rainforest backdrop.",
+            "highlights": [
+              "Direct/Partner booking saves \u20b94,500 over Airbnb's syndicated checkout total",
+              "Lowest-fatigue location for En Ooru, Lakkidi Viewpoint, and ClayHut dining",
+              "Full living room + private pool deck for relaxed mornings before moderate climbs"
+            ],
+            "offers": [
+              {
+                "platform": "Direct Host / Booking Partner",
+                "channel_type": "direct_brand",
+                "base_total_inr": 43660,
+                "extra_bed_or_addons_inr": 0,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 5240,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 48900,
+                "per_night_landed_inr": 16300,
+                "inclusions": [
+                  "Entire 2BHK Villa",
+                  "100% Private Pool",
+                  "Breakfast Option"
+                ],
+                "promo_note": "Zero platform service fee via direct host / Genius rate",
+                "booking_url": "https://www.booking.com/",
+                "is_best_deal": true
+              },
+              {
+                "platform": "Airbnb",
+                "channel_type": "airbnb",
+                "base_total_inr": 44500,
+                "extra_bed_or_addons_inr": 0,
+                "platform_or_cleaning_fee_inr": 6320,
+                "taxes_gst_inr": 2580,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 53400,
+                "per_night_landed_inr": 17800,
+                "inclusions": [
+                  "Entire 2BHK Villa",
+                  "100% Private Pool"
+                ],
+                "promo_note": "Includes Airbnb guest service fee",
+                "booking_url": "https://www.airbnb.co.in/",
+                "is_best_deal": false
+              }
+            ],
+            "best_channel": "Direct Host / Booking Partner",
+            "best_landed_inr": 48900,
+            "worst_landed_inr": 53400,
+            "savings_inr": 4500,
+            "deal_anomaly_score": 90.4,
+            "anomaly_badge": "Exclusive Private Pool @ \u20b916.3k/N"
+          },
+          {
+            "id": "radisson-mysore-dec25",
+            "name": "Radisson Blu Plaza Hotel Mysore",
+            "subtitle": "Return Anchor \u00b7 Fri, Dec 25 (1 Night \u00b7 Christmas Peak)",
+            "category": "hotel",
+            "city": "Mysuru",
+            "micro_region": "MG Road \u00b7 Chamundi Foothills",
+            "lat": 12.2979,
+            "lng": 76.6667,
+            "rating": 4.6,
+            "review_count": 4820,
+            "bedrooms_label": "Deluxe Room + Rollaway Extra Bed",
+            "check_in": "2026-12-25",
+            "check_out": "2026-12-26",
+            "nights": 1,
+            "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=1000&q=80",
+            "suv_access_note": "Easy 4:30 PM arrival from Bandipur; quick access to NH275 Expressway after lunch on Dec 26.",
+            "kid_fit_note": "Festive Christmas evening ambiance & buffet without needing to drive into crowded Mysuru Palace zones.",
+            "highlights": [
+              "Dodges mandatory Dec 24 Christmas Eve 5-star Gala surcharge (~\u20b915k family savings!)",
+              "Bank-card OTA promo beats peak rack rate by \u20b92,700 on Dec 25",
+              "12:00 PM checkout pairs with leisurely Mysuru lunch before NH275 cruise"
+            ],
+            "offers": [
+              {
+                "platform": "MakeMyTrip",
+                "channel_type": "ota",
+                "base_total_inr": 11800,
+                "extra_bed_or_addons_inr": 2600,
+                "platform_or_cleaning_fee_inr": 420,
+                "taxes_gst_inr": 2592,
+                "promo_discount_inr": 2212,
+                "landed_total_inr": 15200,
+                "per_night_landed_inr": 15200,
+                "inclusions": [
+                  "Super Breakfast",
+                  "Extra Bed",
+                  "No Mandatory Gala Fee"
+                ],
+                "promo_note": "Peak Christmas Friday surge offset via \u20b92,212 HDFC/ICICI festive instant discount",
+                "booking_url": "https://www.makemytrip.com/hotels/",
+                "is_best_deal": true
+              },
+              {
+                "platform": "Radisson Rewards Direct",
+                "channel_type": "direct_brand",
+                "base_total_inr": 10900,
+                "extra_bed_or_addons_inr": 2500,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 2412,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 15812,
+                "per_night_landed_inr": 15812,
+                "inclusions": [
+                  "Super Breakfast",
+                  "Extra Rollaway Bed"
+                ],
+                "promo_note": "Member direct rate without third-party convenience fee",
+                "booking_url": "https://www.radissonhotels.com/",
+                "is_best_deal": false
+              },
+              {
+                "platform": "Agoda",
+                "channel_type": "ota",
+                "base_total_inr": 12600,
+                "extra_bed_or_addons_inr": 2600,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 2736,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 17936,
+                "per_night_landed_inr": 17936,
+                "inclusions": [
+                  "Breakfast",
+                  "Extra Bed"
+                ],
+                "promo_note": "Christmas peak dynamic pricing",
+                "booking_url": "https://www.agoda.com/",
+                "is_best_deal": false
+              }
+            ],
+            "best_channel": "MakeMyTrip",
+            "best_landed_inr": 15200,
+            "worst_landed_inr": 17936,
+            "savings_inr": 2736,
+            "deal_anomaly_score": 91.0,
+            "anomaly_badge": "Dodges Dec 24 Gala Surcharge"
+          }
+        ],
+        "flights": [],
+        "road": {
+          "vehicle": "Jeep Meridian SUV (Own Car)",
+          "ground_clearance_mm": 203,
+          "total_distance_km": 740.0,
+          "total_drive_hours": 17.6,
+          "estimated_fuel_liters": 59.5,
+          "fuel_cost_inr": 5550,
+          "fastag_and_forest_tolls_inr": 1250,
+          "rental_car_cost_inr": 0,
+          "total_road_cost_inr": 6800,
+          "corridor_notes": [
+            "Exit Koramangala via Electronic City NICE Ramp at 2:00 PM to bypass city Mysore Rd bottlenecks.",
+            "Radisson Blu Mysore sits on the southern NH766 exit \u2014 saves 35 mins of Mysuru inner-city traffic on Dec 22.",
+            "Strict 40 km/h speed limit & zero-stopping rule inside 30 km Bandipur\u2013Muthanga forest stretch."
+          ],
+          "segments": [
+            {
+              "id": "seg-day1-blr-mys",
+              "day_number": 1,
+              "from_name": "Koramangala, Bengaluru",
+              "to_name": "Radisson Blu Plaza Hotel Mysore",
+              "highway_label": "NICE Road -> NH275 Bengaluru\u2013Mysuru Access-Controlled Expressway",
+              "distance_km": 162.0,
+              "duration_mins": 195,
+              "fastag_toll_inr": 534,
+              "fuel_estimate_inr": 1180,
+              "gate_alert": null,
+              "coordinates": [
+                [
+                  77.6245,
+                  12.9352
+                ],
+                [
+                  77.6229,
+                  12.9172
+                ],
+                [
+                  77.6598,
+                  12.849
+                ],
+                [
+                  77.547,
+                  12.863
+                ],
+                [
+                  77.4662,
+                  12.8975
+                ],
+                [
+                  77.281,
+                  12.715
+                ],
+                [
+                  76.8958,
+                  12.5218
+                ],
+                [
+                  76.698,
+                  12.356
+                ],
+                [
+                  76.6667,
+                  12.2979
+                ]
+              ]
+            },
+            {
+              "id": "seg-day2-mys-wayanad",
+              "day_number": 2,
+              "from_name": "Radisson Blu Plaza Hotel Mysore",
+              "to_name": "Vythiri / Kalpetta Villa Base, Wayanad",
+              "highway_label": "NH766 (Nanjangud -> Gundlupet -> Bandipur -> Muthanga -> Sultan Bathery)",
+              "distance_km": 138.0,
+              "duration_mins": 210,
+              "fastag_toll_inr": 90,
+              "fuel_estimate_inr": 1080,
+              "gate_alert": "NH766 Bandipur\u2013Muthanga Tiger Reserve Night Ban (9:00 PM \u2013 6:00 AM). Your 9:30 AM departure crosses smoothly ~10:45\u201311:45 AM.",
+              "coordinates": [
+                [
+                  76.6667,
+                  12.2979
+                ],
+                [
+                  76.682,
+                  12.12
+                ],
+                [
+                  76.6895,
+                  11.8082
+                ],
+                [
+                  76.6345,
+                  11.6662
+                ],
+                [
+                  76.3712,
+                  11.6695
+                ],
+                [
+                  76.257,
+                  11.665
+                ],
+                [
+                  76.132,
+                  11.6854
+                ],
+                [
+                  76.0825,
+                  11.6103
+                ],
+                [
+                  76.041,
+                  11.5515
+                ]
+              ]
+            },
+            {
+              "id": "seg-day3-4-wayanad-local",
+              "day_number": 3,
+              "from_name": "Vythiri Villa Base",
+              "to_name": "Edakkal \u00b7 Phantom Rock \u00b7 Soochipara \u00b7 En Ooru Loop",
+              "highway_label": "Wayanad Ghat & Tea-Estate Corridors (Days 3 & 4 Combined)",
+              "distance_km": 140.0,
+              "duration_mins": 255,
+              "fastag_toll_inr": 0,
+              "fuel_estimate_inr": 1230,
+              "gate_alert": "Steep plantation & Meppadi hill gradients \u2014 ideal for Jeep Meridian 2.0L Diesel torque & 203mm clearance.",
+              "coordinates": [
+                [
+                  76.041,
+                  11.5515
+                ],
+                [
+                  76.2345,
+                  11.6265
+                ],
+                [
+                  76.2055,
+                  11.6378
+                ],
+                [
+                  76.1365,
+                  11.568
+                ],
+                [
+                  76.1632,
+                  11.5122
+                ],
+                [
+                  76.1342,
+                  11.554
+                ],
+                [
+                  76.0235,
+                  11.5342
+                ],
+                [
+                  76.041,
+                  11.5515
+                ]
+              ]
+            },
+            {
+              "id": "seg-day5-wayanad-mys",
+              "day_number": 5,
+              "from_name": "Vythiri / Sultan Bathery, Wayanad",
+              "to_name": "Radisson Blu Plaza Hotel Mysore",
+              "highway_label": "NH766 (Muthanga -> Bandipur Daylight Return -> Gundlupet)",
+              "distance_km": 138.0,
+              "duration_mins": 205,
+              "fastag_toll_inr": 90,
+              "fuel_estimate_inr": 1040,
+              "gate_alert": "Early-afternoon departure (~1:15 PM post-lunch) clears Bandipur gate ~2:45 PM with 6+ hours of daylight buffer.",
+              "coordinates": [
+                [
+                  76.041,
+                  11.5515
+                ],
+                [
+                  76.0825,
+                  11.6103
+                ],
+                [
+                  76.132,
+                  11.6854
+                ],
+                [
+                  76.257,
+                  11.665
+                ],
+                [
+                  76.3712,
+                  11.6695
+                ],
+                [
+                  76.6345,
+                  11.6662
+                ],
+                [
+                  76.6895,
+                  11.8082
+                ],
+                [
+                  76.682,
+                  12.12
+                ],
+                [
+                  76.6667,
+                  12.2979
+                ]
+              ]
+            },
+            {
+              "id": "seg-day6-mys-blr",
+              "day_number": 6,
+              "from_name": "Radisson Blu Plaza Hotel Mysore",
+              "to_name": "Koramangala, Bengaluru",
+              "highway_label": "NH275 Expressway -> NICE Road -> Electronic City Ramp",
+              "distance_km": 162.0,
+              "duration_mins": 195,
+              "fastag_toll_inr": 534,
+              "fuel_estimate_inr": 1020,
+              "gate_alert": null,
+              "coordinates": [
+                [
+                  76.6667,
+                  12.2979
+                ],
+                [
+                  76.698,
+                  12.356
+                ],
+                [
+                  76.8958,
+                  12.5218
+                ],
+                [
+                  77.281,
+                  12.715
+                ],
+                [
+                  77.4662,
+                  12.8975
+                ],
+                [
+                  77.547,
+                  12.863
+                ],
+                [
+                  77.6598,
+                  12.849
+                ],
+                [
+                  77.6229,
+                  12.9172
+                ],
+                [
+                  77.6245,
+                  12.9352
+                ]
+              ]
+            }
+          ]
+        },
+        "arbitrage_callouts": [
+          "Wayanad Pearls Private Pool Villa: \u20b916,300/night all-in via Direct Host / Booking Partner (within \u20b915k\u2013\u20b920k target).",
+          "Same-Property Fee Stripping: Booking Wayanad Pearls Private Pool Villa via Direct Host / Booking Partner saves \u20b94,500 vs. Airbnb's ~14.2% service fee.",
+          "Dec 24 Villa vs. 5-Star Resort Arbitrage: Staying in a private villa on Christmas Eve dodges \u20b912,000\u2013\u20b918,000 in mandatory 5-star Gala Dinner surcharges.",
+          "Radisson Blu Mysore Split-Channel Booking: Member Direct on Mon Dec 21 (\u20b912,500) + MMT Festive Card Offer on Fri Dec 25 (\u20b915,200) saves \u20b94,337."
+        ],
+        "days": [
+          {
+            "day_number": 1,
+            "date_label": "Mon, Dec 21",
+            "weekday": "Monday",
+            "headline": "2 PM Koramangala Rollout -> Radisson Blu Mysore Rest Anchor",
+            "corridor_tag": "NH275 Expressway \u00b7 162 km",
+            "drive_km": 162.0,
+            "drive_time_label": "3h 15m",
+            "overnight_label": "Radisson Blu Plaza Hotel Mysore",
+            "stops": [
+              {
+                "id": "d1-s1",
+                "time_window": "2:00 PM \u2013 5:15 PM",
+                "title": "Expressway Cruise: Koramangala -> Mysuru",
+                "location_label": "NICE Road -> NH275 Bengaluru\u2013Mysuru Expressway (162 km)",
+                "category": "drive",
+                "lat": 12.715,
+                "lng": 77.281,
+                "duration_label": "3h 15m",
+                "description": "Roll out of Koramangala at 2:00 PM via Electronic City ramp onto NICE Road -> Cloverleaf -> NH275 Expressway -> Mysuru Outer Ring Road East.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": "FASTag auto-deducts \u20b9164 (NICE) + \u20b9370 (Kaniminike & Gananguru NH275 plazas)."
+              },
+              {
+                "id": "d1-s2",
+                "time_window": "5:15 PM",
+                "title": "Check-in & Pool Unwind at Radisson Blu Plaza Mysore",
+                "location_label": "MG Road \u00b7 Race Course / Chamundi Foothills",
+                "category": "stay",
+                "lat": 12.2979,
+                "lng": 76.6667,
+                "duration_label": "Overnight (Deluxe + Extra Bed)",
+                "description": "Relaxed hotel evening with Chamundi Hills view pool \u2014 zero city sightseeing detours as requested.",
+                "dietary_note": null,
+                "kid_note": "Kids aged 8 & 10 unwind at the pool after the 3-hour drive.",
+                "insider_tip": null
+              },
+              {
+                "id": "d1-s3",
+                "time_window": "7:30 PM",
+                "title": "Family Dinner at Spring (Radisson On-Site)",
+                "location_label": "Radisson Blu Plaza Hotel Mysore",
+                "category": "dining",
+                "lat": 12.2979,
+                "lng": 76.6667,
+                "duration_label": "1h 30m",
+                "description": "Effortless multi-cuisine buffet & live grills right inside the hotel so nobody steps back into traffic.",
+                "dietary_note": "Full Veg + Non-Veg spread (South Indian, kebabs, pastas, desserts).",
+                "kid_note": null,
+                "insider_tip": null
+              }
+            ]
+          },
+          {
+            "day_number": 2,
+            "date_label": "Tue, Dec 22",
+            "weekday": "Tuesday",
+            "headline": "Bandipur Forest Canopy Drive -> Wayanad Coffee-Estate Villa",
+            "corridor_tag": "NH766 Forest Corridor \u00b7 138 km",
+            "drive_km": 138.0,
+            "drive_time_label": "3h 30m",
+            "overnight_label": "Wayanad Pearls Private Pool Villa",
+            "stops": [
+              {
+                "id": "d2-s1",
+                "time_window": "9:30 AM \u2013 12:15 PM",
+                "title": "Morning Forest Corridor Drive: Mysuru -> Sultan Bathery",
+                "location_label": "NH766 \u00b7 Bandipur & Muthanga Tiger Reserves (115 km)",
+                "category": "drive",
+                "lat": 11.6662,
+                "lng": 76.6345,
+                "duration_label": "2h 45m",
+                "description": "After Radisson's Super Breakfast, exit southern Mysuru straight onto NH766. Cruise slowly through 30 km of Bandipur\u2013Muthanga forest canopy.",
+                "dietary_note": null,
+                "kid_note": "High Jeep Meridian windows give effortless roadside sightings of spotted deer, peacocks, langurs, and wild elephants \u2014 no formal safari required.",
+                "insider_tip": "Keep speed <=40 km/h over forest humps; stopping or feeding wildlife is strictly fined."
+              },
+              {
+                "id": "d2-s2",
+                "time_window": "12:15 PM \u2013 1:20 PM",
+                "title": "Highway Family Lunch at The Wilton Restaurant",
+                "location_label": "Sultan Bathery (Right on NH766)",
+                "category": "dining",
+                "lat": 11.665,
+                "lng": 76.257,
+                "duration_label": "1h 05m",
+                "description": "Spacious, spotless AC family landmark right as you enter Wayanad.",
+                "dietary_note": "Must-order: Malabar Chicken/Mutton Biryani, Tawa Fish Fry, and crisp North/South Indian Veg platters.",
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d2-s3",
+                "time_window": "2:00 PM",
+                "title": "Check-in at Wayanad Pearls Private Pool Villa",
+                "location_label": "Old Vythiri (5 mins from En Ooru & Lakkidi)",
+                "category": "stay",
+                "lat": 11.539,
+                "lng": 76.0285,
+                "duration_label": "3-Night Family Base",
+                "description": "Settle into your 2 BHK villa. Kids get room to roam, swim, and play board games.",
+                "dietary_note": null,
+                "kid_note": "100% private pool just for the 4 of you (not shared), full kitchen, misty rainforest backdrop.",
+                "insider_tip": null
+              },
+              {
+                "id": "d2-s4",
+                "time_window": "4:30 PM \u2013 6:00 PM",
+                "title": "Guided Coffee, Black Pepper & Cardamom Estate Walk",
+                "location_label": "On-Estate Plantation Trails",
+                "category": "nature",
+                "lat": 11.543,
+                "lng": 76.0325,
+                "duration_label": "1h 30m",
+                "description": "Easy first-evening plantation stroll seeing Arabica/Robusta coffee berries, pepper vines, and cocoa pods, followed by homestyle Kerala dinner at the villa.",
+                "dietary_note": "Villa dinner: Hot Appams + Vegetable Stew + Nadan Chicken Roast.",
+                "kid_note": null,
+                "insider_tip": null
+              }
+            ]
+          },
+          {
+            "day_number": 3,
+            "date_label": "Wed, Dec 23",
+            "weekday": "Wednesday",
+            "headline": "Edakkal Stone-Age Climb, Phantom Rock & 1980's Kerala Feast",
+            "corridor_tag": "Ambalavayal \u2013 Kalpetta Loop \u00b7 72 km",
+            "drive_km": 72.0,
+            "drive_time_label": "2h 05m total",
+            "overnight_label": "Wayanad Pearls Private Pool Villa",
+            "stops": [
+              {
+                "id": "d3-s1",
+                "time_window": "9:15 AM \u2013 11:30 AM",
+                "title": "Moderate Climb #1: Edakkal Caves (Neolithic Petroglyphs)",
+                "location_label": "Ambukuthi Mala, Ambalavayal",
+                "category": "climb",
+                "lat": 11.6265,
+                "lng": 76.2345,
+                "duration_label": "2h 15m",
+                "description": "Steep paved hill walk + ~300 rock-cut steps and iron ladders wedged between giant split boulders revealing 6,000-year-old Stone Age carvings.",
+                "dietary_note": null,
+                "kid_note": "Thrilling boulder-cleft climb for ages 8 & 10 with panoramic Wayanad plateau views at the top.",
+                "insider_tip": "Arriving by 9:15 AM beats Christmas-week ticket queues by 60+ minutes and avoids midday sun."
+              },
+              {
+                "id": "d3-s2",
+                "time_window": "11:45 AM \u2013 12:30 PM",
+                "title": "Short Rock Scramble: Phantom Rock (Cheengeri Mala)",
+                "location_label": "Ambalavayal (15 mins from Edakkal)",
+                "category": "climb",
+                "lat": 11.6378,
+                "lng": 76.2055,
+                "duration_label": "45m",
+                "description": "Natural skull-shaped metamorphic rock formation with gentle, grippy boulder slabs and sweeping valley breezes.",
+                "dietary_note": null,
+                "kid_note": "Easy 20-minute scramble with great family photo vantage points.",
+                "insider_tip": null
+              },
+              {
+                "id": "d3-s3",
+                "time_window": "1:15 PM \u2013 2:30 PM",
+                "title": "Signature Kerala Feast at 1980's \u2013 A Nostalgic Restaurant",
+                "location_label": "Kalpetta / Meppadi",
+                "category": "dining",
+                "lat": 11.5882,
+                "lng": 76.0915,
+                "duration_label": "1h 15m",
+                "description": "Set inside a vintage Kerala ancestral home with 80s memorabilia and warm family hospitality.",
+                "dietary_note": "Veg + Non-Veg: Banana-leaf Kerala Sadhya meals, Meen Pollichathu (fish roasted in banana leaf), Nadan Chicken Curry, Prawn Roast & Sulaimani tea.",
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d3-s4",
+                "time_window": "3:00 PM \u2013 4:15 PM",
+                "title": "Uravu Indigenous Bamboo Craft Village",
+                "location_label": "Thrikkaipetta",
+                "category": "heritage",
+                "lat": 11.568,
+                "lng": 76.1365,
+                "duration_label": "1h 15m",
+                "description": "Calm open-air artisan centre where kids watch craftspeople turn giant Wayanad bamboo into architecture, toys, and puzzles \u2014 zero theme-park crowds.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": "Pick up hand-carved bamboo brain-teaser puzzles for the kids for the drive home."
+              }
+            ]
+          },
+          {
+            "day_number": 4,
+            "date_label": "Thu, Dec 24",
+            "weekday": "Christmas Eve",
+            "headline": "Soochipara Waterfall Steps, Tea Ridges, En Ooru & Villa BBQ",
+            "corridor_tag": "Meppadi \u2013 Lakkidi Loop \u00b7 68 km",
+            "drive_km": 68.0,
+            "drive_time_label": "2h 00m total",
+            "overnight_label": "Wayanad Pearls Private Pool Villa",
+            "stops": [
+              {
+                "id": "d4-s1",
+                "time_window": "9:00 AM \u2013 11:30 AM",
+                "title": "Moderate Climb #2: Soochipara (Sentinel Rock) Waterfalls",
+                "location_label": "Meppadi Forest Range",
+                "category": "climb",
+                "lat": 11.5122,
+                "lng": 76.1632,
+                "duration_label": "2h 30m",
+                "description": "Scenic ~1.2 km stone-stepped forest descent & climb back up (25 mins each way through tea estates and deciduous canopy) to a dramatic 200-ft 3-tiered waterfall.",
+                "dietary_note": null,
+                "kid_note": "Great leg-stretching forest step climb (no water rides). Lighter backup 15 mins away: Kanthanpara Waterfalls.",
+                "insider_tip": "Carry reusable metal water bottles \u2014 forest checkpost prohibits single-use plastic bottles."
+              },
+              {
+                "id": "d4-s2",
+                "time_window": "11:45 AM \u2013 12:45 PM",
+                "title": "Meppadi & Arapetta Tea-Estate Ridge Walk",
+                "location_label": "Ripon / Meppadi Tea Hills",
+                "category": "nature",
+                "lat": 11.554,
+                "lng": 76.1342,
+                "duration_label": "1h 00m",
+                "description": "Gentle walk along manicured green tea-picker ridges framed by mist-draped Chembra Peak.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d4-s3",
+                "time_window": "1:15 PM \u2013 2:30 PM",
+                "title": "Rustic Village Lunch at ClayHut Restaurant",
+                "location_label": "Kalpetta Bypass",
+                "category": "dining",
+                "lat": 11.604,
+                "lng": 76.0835,
+                "duration_label": "1h 15m",
+                "description": "Cozy open-air clay and bamboo huts tucked inside lush greenery.",
+                "dietary_note": "Homestyle Kerala Veg curries, coconut-oil tawa fish fry, country chicken roast & flaky Malabar parottas.",
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d4-s4",
+                "time_window": "3:15 PM \u2013 4:45 PM",
+                "title": "En Ooru Tribal Heritage Village & Lakkidi Viewpoint",
+                "location_label": "Pookode / Lakkidi Ghat Crest",
+                "category": "heritage",
+                "lat": 11.5342,
+                "lng": 76.0235,
+                "duration_label": "1h 30m",
+                "description": "Walk an open-air hilltop tribal hamlet showcasing indigenous mud-and-thatch architecture, tribal crafts, and sweeping valley vistas, ending with sunset over Thamarassery Ghat.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": "7:30 PM Christmas Eve back at your private villa: pre-order a garden bonfire + Veg/Chicken/Fish BBQ under the stars."
+              }
+            ]
+          },
+          {
+            "day_number": 5,
+            "date_label": "Fri, Dec 25",
+            "weekday": "Christmas Day",
+            "headline": "Slow Villa Morning -> Early-Afternoon Return to Radisson Mysore",
+            "corridor_tag": "NH766 Daylight Return \u00b7 138 km",
+            "drive_km": 138.0,
+            "drive_time_label": "3h 25m",
+            "overnight_label": "Radisson Blu Plaza Hotel Mysore",
+            "stops": [
+              {
+                "id": "d5-s1",
+                "time_window": "8:30 AM \u2013 11:30 AM",
+                "title": "Unhurried Christmas Morning at the Villa",
+                "location_label": "Wayanad Pearls Private Pool Villa",
+                "category": "stay",
+                "lat": 11.539,
+                "lng": 76.0285,
+                "duration_label": "Morning",
+                "description": "Sleep in, enjoy slow Christmas breakfast on the veranda, one final dip in the pool, and pack at an easy family pace.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d5-s2",
+                "time_window": "12:15 PM \u2013 1:15 PM",
+                "title": "Early-Afternoon Return Lunch at Mathai's Restocafe",
+                "location_label": "Sultan Bathery",
+                "category": "dining",
+                "lat": 11.662,
+                "lng": 76.261,
+                "duration_label": "1h 00m",
+                "description": "Airy modern family restocafe right on NH766 before entering the forest checkpost.",
+                "dietary_note": "Pastas/continental kid favorites alongside Kerala Veg & Non-Veg specials (Alt: Hotel Udupi for crisp dosas).",
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d5-s3",
+                "time_window": "1:15 PM \u2013 4:30 PM",
+                "title": "Daylight Forest Drive Back to Radisson Blu Mysore",
+                "location_label": "Sultan Bathery -> Muthanga -> Bandipur -> Mysuru (115 km)",
+                "category": "drive",
+                "lat": 11.8082,
+                "lng": 76.6895,
+                "duration_label": "3h 15m",
+                "description": "Cross Muthanga & Bandipur ~1:35\u20132:45 PM in bright daylight, pulling into Radisson Blu Plaza Mysore by 4:30 PM for a festive Christmas evening buffet & deep rest.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              }
+            ]
+          },
+          {
+            "day_number": 6,
+            "date_label": "Sat, Dec 26",
+            "weekday": "Saturday",
+            "headline": "Unhurried Mysuru Lunch -> Afternoon Cruise Home to Koramangala",
+            "corridor_tag": "NH275 Expressway \u00b7 162 km",
+            "drive_km": 162.0,
+            "drive_time_label": "3h 15m",
+            "overnight_label": "Home \u00b7 Koramangala",
+            "stops": [
+              {
+                "id": "d6-s1",
+                "time_window": "8:30 AM \u2013 12:00 PM",
+                "title": "Lazy Radisson Morning & Super Breakfast",
+                "location_label": "Radisson Blu Plaza Hotel Mysore",
+                "category": "stay",
+                "lat": 12.2979,
+                "lng": 76.6667,
+                "duration_label": "Morning",
+                "description": "Sleep in, enjoy the full breakfast spread and pool/lounge, and check out at 12:00 PM.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d6-s2",
+                "time_window": "12:30 PM \u2013 1:45 PM",
+                "title": "Farewell Lunch at The Old House (or Hotel RRR)",
+                "location_label": "Mysuru (Zero-Sightseeing Culinary Stop, 7 mins away)",
+                "category": "dining",
+                "lat": 12.3095,
+                "lng": 76.649,
+                "duration_label": "1h 15m",
+                "description": "Leafy heritage bungalow cafe serving wood-fired pizzas, handmade pastas & salads kids love \u2014 or pick Hotel RRR for iconic banana-leaf biryani & veg meals.",
+                "dietary_note": "Both Veg & Non-Veg; light and comfortable right before the afternoon highway run.",
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d6-s3",
+                "time_window": "2:00 PM \u2013 5:15 PM",
+                "title": "Post-Lunch Expressway Return to Koramangala",
+                "location_label": "NH275 Expressway -> NICE Road -> Electronic City -> Koramangala",
+                "category": "drive",
+                "lat": 12.9352,
+                "lng": 77.6245,
+                "duration_label": "3h 15m",
+                "description": "Smooth Saturday afternoon cruise back home on NH275, arriving in Koramangala by ~5:15\u20135:30 PM.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "bp-wayanad-3",
+        "rank_badge": "Lowest All-In Private Pool",
+        "name": "\"Brookview\" Tranquil Coffee Chalet + Radisson Mysore Anchors",
+        "strategy_subtitle": "100% Exclusive Family Pool + Min Driving Fatigue",
+        "recommended": false,
+        "total_core_landed_inr": 84000,
+        "unoptimized_baseline_inr": 88337,
+        "total_arbitrage_savings_inr": 4337,
+        "dining_and_activities_est_inr": 18500,
+        "fatigue_score": 21,
+        "quality_score": 92,
+        "deal_anomaly_score": 89.0,
+        "stays": [
+          {
+            "id": "radisson-mysore-dec21",
+            "name": "Radisson Blu Plaza Hotel Mysore",
+            "subtitle": "Outbound Anchor \u00b7 Mon, Dec 21 (1 Night \u00b7 Weekday Pre-Surge)",
+            "category": "hotel",
+            "city": "Mysuru",
+            "micro_region": "MG Road \u00b7 Chamundi Foothills (NH766 Southern Exit)",
+            "lat": 12.2979,
+            "lng": 76.6667,
+            "rating": 4.6,
+            "review_count": 4820,
+            "bedrooms_label": "Deluxe Room + Rollaway Extra Bed",
+            "check_in": "2026-12-21",
+            "check_out": "2026-12-22",
+            "nights": 1,
+            "image_url": "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=1000&q=80",
+            "suv_access_note": "Valet + spacious paved surface parking for Jeep Meridian; 2 mins from NH766 Nanjangud/Bandipur highway exit.",
+            "kid_fit_note": "Kids aged 8 & 10 qualify under Radisson's <=10 child rule; large outdoor pool facing Chamundi Hills.",
+            "highlights": [
+              "Southern Mysuru location skips 100% of city traffic on Dec 22 morning",
+              "Super Breakfast buffet included; child #2 (<=10 yrs) avoids adult extra-bed tariff",
+              "On-site Spring multi-cuisine dining after 2 PM Bengaluru drive"
+            ],
+            "offers": [
+              {
+                "platform": "Radisson Rewards Direct",
+                "channel_type": "direct_brand",
+                "base_total_inr": 8400,
+                "extra_bed_or_addons_inr": 2200,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 1900,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 12500,
+                "per_night_landed_inr": 12500,
+                "inclusions": [
+                  "Super Breakfast",
+                  "Extra Rollaway Bed",
+                  "Kids <=10 Child Policy"
+                ],
+                "promo_note": "Free Radisson Rewards Member tier (~12% off + direct child breakfast leverage)",
+                "booking_url": "https://www.radissonhotels.com/",
+                "is_best_deal": true
+              },
+              {
+                "platform": "MakeMyTrip",
+                "channel_type": "ota",
+                "base_total_inr": 9100,
+                "extra_bed_or_addons_inr": 2500,
+                "platform_or_cleaning_fee_inr": 380,
+                "taxes_gst_inr": 2088,
+                "promo_discount_inr": 1400,
+                "landed_total_inr": 12668,
+                "per_night_landed_inr": 12668,
+                "inclusions": [
+                  "Breakfast",
+                  "Extra Bed"
+                ],
+                "promo_note": "MMTBLACK + HDFC/ICICI instant card discount applied",
+                "booking_url": "https://www.makemytrip.com/hotels/",
+                "is_best_deal": false
+              },
+              {
+                "platform": "Agoda",
+                "channel_type": "ota",
+                "base_total_inr": 9200,
+                "extra_bed_or_addons_inr": 2500,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 2106,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 13806,
+                "per_night_landed_inr": 13806,
+                "inclusions": [
+                  "Breakfast Add-on",
+                  "Extra Bed"
+                ],
+                "promo_note": "Base rate excludes breakfast by default; all-in rises at checkout",
+                "booking_url": "https://www.agoda.com/",
+                "is_best_deal": false
+              },
+              {
+                "platform": "Booking.com",
+                "channel_type": "ota",
+                "base_total_inr": 9450,
+                "extra_bed_or_addons_inr": 2500,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 2151,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 14101,
+                "per_night_landed_inr": 14101,
+                "inclusions": [
+                  "Breakfast",
+                  "Extra Bed",
+                  "Free Cancellation Window"
+                ],
+                "promo_note": "Genius Level 2 priced with 18% luxury hotel GST slab",
+                "booking_url": "https://www.booking.com/",
+                "is_best_deal": false
+              }
+            ],
+            "best_channel": "Radisson Rewards Direct",
+            "best_landed_inr": 12500,
+            "worst_landed_inr": 14101,
+            "savings_inr": 1601,
+            "deal_anomaly_score": 87.5,
+            "anomaly_badge": "Age-10 Child Cutoff Arbitrage"
+          },
+          {
+            "id": "wayanad-brookview-chalet",
+            "name": "\"Brookview\" Tranquil Coffee Chalet",
+            "subtitle": "Kottur River \u00b7 10-Acre Working Coffee Estate \u00b7 2 BHK Airbnb Guest Favorite",
+            "category": "airbnb",
+            "city": "Wayanad",
+            "micro_region": "Kalpetta \u2013 Kottur River Estate Belt",
+            "lat": 11.589,
+            "lng": 76.074,
+            "rating": 4.94,
+            "review_count": 96,
+            "bedrooms_label": "2 BHK Two-Story Wood & Stone Chalet + Pool",
+            "check_in": "2026-12-22",
+            "check_out": "2026-12-25",
+            "nights": 3,
+            "image_url": "https://images.unsplash.com/photo-1542718610-a1d656d1884c?auto=format&fit=crop&w=1000&q=80",
+            "suv_access_note": "Gravel coffee-plantation driveway inside 10-acre estate \u2014 smooth ride in Jeep Meridian.",
+            "kid_fit_note": "River-rapids nature trail inside the estate, coffee & pepper bush walks, campfire pit, and pool.",
+            "highlights": [
+              "Airbnb-exclusive Superhost chalet tucked inside 10+ acres of fragrant coffee",
+              "Lands comfortably at \u20b916,500/night even with Christmas week surge & Airbnb fees",
+              "Private decks on both bedrooms overlooking coffee blossoms and Kottur stream"
+            ],
+            "offers": [
+              {
+                "platform": "Airbnb",
+                "channel_type": "airbnb",
+                "base_total_inr": 41400,
+                "extra_bed_or_addons_inr": 0,
+                "platform_or_cleaning_fee_inr": 5880,
+                "taxes_gst_inr": 2220,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 49500,
+                "per_night_landed_inr": 16500,
+                "inclusions": [
+                  "Entire 2BR Coffee Chalet",
+                  "Estate Pool & River Trail",
+                  "Kitchen"
+                ],
+                "promo_note": "Airbnb Guest Favorite \u00b7 Top 5% of Wayanad homes",
+                "booking_url": "https://www.airbnb.co.in/",
+                "is_best_deal": true
+              }
+            ],
+            "best_channel": "Airbnb",
+            "best_landed_inr": 49500,
+            "worst_landed_inr": 49500,
+            "savings_inr": 0,
+            "deal_anomaly_score": 89.0,
+            "anomaly_badge": "Top-5% Airbnb Plantation Gem @ \u20b916.5k/N"
+          },
+          {
+            "id": "radisson-mysore-dec25",
+            "name": "Radisson Blu Plaza Hotel Mysore",
+            "subtitle": "Return Anchor \u00b7 Fri, Dec 25 (1 Night \u00b7 Christmas Peak)",
+            "category": "hotel",
+            "city": "Mysuru",
+            "micro_region": "MG Road \u00b7 Chamundi Foothills",
+            "lat": 12.2979,
+            "lng": 76.6667,
+            "rating": 4.6,
+            "review_count": 4820,
+            "bedrooms_label": "Deluxe Room + Rollaway Extra Bed",
+            "check_in": "2026-12-25",
+            "check_out": "2026-12-26",
+            "nights": 1,
+            "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=1000&q=80",
+            "suv_access_note": "Easy 4:30 PM arrival from Bandipur; quick access to NH275 Expressway after lunch on Dec 26.",
+            "kid_fit_note": "Festive Christmas evening ambiance & buffet without needing to drive into crowded Mysuru Palace zones.",
+            "highlights": [
+              "Dodges mandatory Dec 24 Christmas Eve 5-star Gala surcharge (~\u20b915k family savings!)",
+              "Bank-card OTA promo beats peak rack rate by \u20b92,700 on Dec 25",
+              "12:00 PM checkout pairs with leisurely Mysuru lunch before NH275 cruise"
+            ],
+            "offers": [
+              {
+                "platform": "MakeMyTrip",
+                "channel_type": "ota",
+                "base_total_inr": 11800,
+                "extra_bed_or_addons_inr": 2600,
+                "platform_or_cleaning_fee_inr": 420,
+                "taxes_gst_inr": 2592,
+                "promo_discount_inr": 2212,
+                "landed_total_inr": 15200,
+                "per_night_landed_inr": 15200,
+                "inclusions": [
+                  "Super Breakfast",
+                  "Extra Bed",
+                  "No Mandatory Gala Fee"
+                ],
+                "promo_note": "Peak Christmas Friday surge offset via \u20b92,212 HDFC/ICICI festive instant discount",
+                "booking_url": "https://www.makemytrip.com/hotels/",
+                "is_best_deal": true
+              },
+              {
+                "platform": "Radisson Rewards Direct",
+                "channel_type": "direct_brand",
+                "base_total_inr": 10900,
+                "extra_bed_or_addons_inr": 2500,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 2412,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 15812,
+                "per_night_landed_inr": 15812,
+                "inclusions": [
+                  "Super Breakfast",
+                  "Extra Rollaway Bed"
+                ],
+                "promo_note": "Member direct rate without third-party convenience fee",
+                "booking_url": "https://www.radissonhotels.com/",
+                "is_best_deal": false
+              },
+              {
+                "platform": "Agoda",
+                "channel_type": "ota",
+                "base_total_inr": 12600,
+                "extra_bed_or_addons_inr": 2600,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 2736,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 17936,
+                "per_night_landed_inr": 17936,
+                "inclusions": [
+                  "Breakfast",
+                  "Extra Bed"
+                ],
+                "promo_note": "Christmas peak dynamic pricing",
+                "booking_url": "https://www.agoda.com/",
+                "is_best_deal": false
+              }
+            ],
+            "best_channel": "MakeMyTrip",
+            "best_landed_inr": 15200,
+            "worst_landed_inr": 17936,
+            "savings_inr": 2736,
+            "deal_anomaly_score": 91.0,
+            "anomaly_badge": "Dodges Dec 24 Gala Surcharge"
+          }
+        ],
+        "flights": [],
+        "road": {
+          "vehicle": "Jeep Meridian SUV (Own Car)",
+          "ground_clearance_mm": 203,
+          "total_distance_km": 740.0,
+          "total_drive_hours": 17.6,
+          "estimated_fuel_liters": 59.5,
+          "fuel_cost_inr": 5550,
+          "fastag_and_forest_tolls_inr": 1250,
+          "rental_car_cost_inr": 0,
+          "total_road_cost_inr": 6800,
+          "corridor_notes": [
+            "Exit Koramangala via Electronic City NICE Ramp at 2:00 PM to bypass city Mysore Rd bottlenecks.",
+            "Radisson Blu Mysore sits on the southern NH766 exit \u2014 saves 35 mins of Mysuru inner-city traffic on Dec 22.",
+            "Strict 40 km/h speed limit & zero-stopping rule inside 30 km Bandipur\u2013Muthanga forest stretch."
+          ],
+          "segments": [
+            {
+              "id": "seg-day1-blr-mys",
+              "day_number": 1,
+              "from_name": "Koramangala, Bengaluru",
+              "to_name": "Radisson Blu Plaza Hotel Mysore",
+              "highway_label": "NICE Road -> NH275 Bengaluru\u2013Mysuru Access-Controlled Expressway",
+              "distance_km": 162.0,
+              "duration_mins": 195,
+              "fastag_toll_inr": 534,
+              "fuel_estimate_inr": 1180,
+              "gate_alert": null,
+              "coordinates": [
+                [
+                  77.6245,
+                  12.9352
+                ],
+                [
+                  77.6229,
+                  12.9172
+                ],
+                [
+                  77.6598,
+                  12.849
+                ],
+                [
+                  77.547,
+                  12.863
+                ],
+                [
+                  77.4662,
+                  12.8975
+                ],
+                [
+                  77.281,
+                  12.715
+                ],
+                [
+                  76.8958,
+                  12.5218
+                ],
+                [
+                  76.698,
+                  12.356
+                ],
+                [
+                  76.6667,
+                  12.2979
+                ]
+              ]
+            },
+            {
+              "id": "seg-day2-mys-wayanad",
+              "day_number": 2,
+              "from_name": "Radisson Blu Plaza Hotel Mysore",
+              "to_name": "Vythiri / Kalpetta Villa Base, Wayanad",
+              "highway_label": "NH766 (Nanjangud -> Gundlupet -> Bandipur -> Muthanga -> Sultan Bathery)",
+              "distance_km": 138.0,
+              "duration_mins": 210,
+              "fastag_toll_inr": 90,
+              "fuel_estimate_inr": 1080,
+              "gate_alert": "NH766 Bandipur\u2013Muthanga Tiger Reserve Night Ban (9:00 PM \u2013 6:00 AM). Your 9:30 AM departure crosses smoothly ~10:45\u201311:45 AM.",
+              "coordinates": [
+                [
+                  76.6667,
+                  12.2979
+                ],
+                [
+                  76.682,
+                  12.12
+                ],
+                [
+                  76.6895,
+                  11.8082
+                ],
+                [
+                  76.6345,
+                  11.6662
+                ],
+                [
+                  76.3712,
+                  11.6695
+                ],
+                [
+                  76.257,
+                  11.665
+                ],
+                [
+                  76.132,
+                  11.6854
+                ],
+                [
+                  76.0825,
+                  11.6103
+                ],
+                [
+                  76.041,
+                  11.5515
+                ]
+              ]
+            },
+            {
+              "id": "seg-day3-4-wayanad-local",
+              "day_number": 3,
+              "from_name": "Vythiri Villa Base",
+              "to_name": "Edakkal \u00b7 Phantom Rock \u00b7 Soochipara \u00b7 En Ooru Loop",
+              "highway_label": "Wayanad Ghat & Tea-Estate Corridors (Days 3 & 4 Combined)",
+              "distance_km": 140.0,
+              "duration_mins": 255,
+              "fastag_toll_inr": 0,
+              "fuel_estimate_inr": 1230,
+              "gate_alert": "Steep plantation & Meppadi hill gradients \u2014 ideal for Jeep Meridian 2.0L Diesel torque & 203mm clearance.",
+              "coordinates": [
+                [
+                  76.041,
+                  11.5515
+                ],
+                [
+                  76.2345,
+                  11.6265
+                ],
+                [
+                  76.2055,
+                  11.6378
+                ],
+                [
+                  76.1365,
+                  11.568
+                ],
+                [
+                  76.1632,
+                  11.5122
+                ],
+                [
+                  76.1342,
+                  11.554
+                ],
+                [
+                  76.0235,
+                  11.5342
+                ],
+                [
+                  76.041,
+                  11.5515
+                ]
+              ]
+            },
+            {
+              "id": "seg-day5-wayanad-mys",
+              "day_number": 5,
+              "from_name": "Vythiri / Sultan Bathery, Wayanad",
+              "to_name": "Radisson Blu Plaza Hotel Mysore",
+              "highway_label": "NH766 (Muthanga -> Bandipur Daylight Return -> Gundlupet)",
+              "distance_km": 138.0,
+              "duration_mins": 205,
+              "fastag_toll_inr": 90,
+              "fuel_estimate_inr": 1040,
+              "gate_alert": "Early-afternoon departure (~1:15 PM post-lunch) clears Bandipur gate ~2:45 PM with 6+ hours of daylight buffer.",
+              "coordinates": [
+                [
+                  76.041,
+                  11.5515
+                ],
+                [
+                  76.0825,
+                  11.6103
+                ],
+                [
+                  76.132,
+                  11.6854
+                ],
+                [
+                  76.257,
+                  11.665
+                ],
+                [
+                  76.3712,
+                  11.6695
+                ],
+                [
+                  76.6345,
+                  11.6662
+                ],
+                [
+                  76.6895,
+                  11.8082
+                ],
+                [
+                  76.682,
+                  12.12
+                ],
+                [
+                  76.6667,
+                  12.2979
+                ]
+              ]
+            },
+            {
+              "id": "seg-day6-mys-blr",
+              "day_number": 6,
+              "from_name": "Radisson Blu Plaza Hotel Mysore",
+              "to_name": "Koramangala, Bengaluru",
+              "highway_label": "NH275 Expressway -> NICE Road -> Electronic City Ramp",
+              "distance_km": 162.0,
+              "duration_mins": 195,
+              "fastag_toll_inr": 534,
+              "fuel_estimate_inr": 1020,
+              "gate_alert": null,
+              "coordinates": [
+                [
+                  76.6667,
+                  12.2979
+                ],
+                [
+                  76.698,
+                  12.356
+                ],
+                [
+                  76.8958,
+                  12.5218
+                ],
+                [
+                  77.281,
+                  12.715
+                ],
+                [
+                  77.4662,
+                  12.8975
+                ],
+                [
+                  77.547,
+                  12.863
+                ],
+                [
+                  77.6598,
+                  12.849
+                ],
+                [
+                  77.6229,
+                  12.9172
+                ],
+                [
+                  77.6245,
+                  12.9352
+                ]
+              ]
+            }
+          ]
+        },
+        "arbitrage_callouts": [
+          "\"Brookview\" Tranquil Coffee Chalet: \u20b916,500/night all-in via Airbnb (within \u20b915k\u2013\u20b920k target).",
+          "Dec 24 Villa vs. 5-Star Resort Arbitrage: Staying in a private villa on Christmas Eve dodges \u20b912,000\u2013\u20b918,000 in mandatory 5-star Gala Dinner surcharges.",
+          "Radisson Blu Mysore Split-Channel Booking: Member Direct on Mon Dec 21 (\u20b912,500) + MMT Festive Card Offer on Fri Dec 25 (\u20b915,200) saves \u20b94,337."
+        ],
+        "days": [
+          {
+            "day_number": 1,
+            "date_label": "Mon, Dec 21",
+            "weekday": "Monday",
+            "headline": "2 PM Koramangala Rollout -> Radisson Blu Mysore Rest Anchor",
+            "corridor_tag": "NH275 Expressway \u00b7 162 km",
+            "drive_km": 162.0,
+            "drive_time_label": "3h 15m",
+            "overnight_label": "Radisson Blu Plaza Hotel Mysore",
+            "stops": [
+              {
+                "id": "d1-s1",
+                "time_window": "2:00 PM \u2013 5:15 PM",
+                "title": "Expressway Cruise: Koramangala -> Mysuru",
+                "location_label": "NICE Road -> NH275 Bengaluru\u2013Mysuru Expressway (162 km)",
+                "category": "drive",
+                "lat": 12.715,
+                "lng": 77.281,
+                "duration_label": "3h 15m",
+                "description": "Roll out of Koramangala at 2:00 PM via Electronic City ramp onto NICE Road -> Cloverleaf -> NH275 Expressway -> Mysuru Outer Ring Road East.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": "FASTag auto-deducts \u20b9164 (NICE) + \u20b9370 (Kaniminike & Gananguru NH275 plazas)."
+              },
+              {
+                "id": "d1-s2",
+                "time_window": "5:15 PM",
+                "title": "Check-in & Pool Unwind at Radisson Blu Plaza Mysore",
+                "location_label": "MG Road \u00b7 Race Course / Chamundi Foothills",
+                "category": "stay",
+                "lat": 12.2979,
+                "lng": 76.6667,
+                "duration_label": "Overnight (Deluxe + Extra Bed)",
+                "description": "Relaxed hotel evening with Chamundi Hills view pool \u2014 zero city sightseeing detours as requested.",
+                "dietary_note": null,
+                "kid_note": "Kids aged 8 & 10 unwind at the pool after the 3-hour drive.",
+                "insider_tip": null
+              },
+              {
+                "id": "d1-s3",
+                "time_window": "7:30 PM",
+                "title": "Family Dinner at Spring (Radisson On-Site)",
+                "location_label": "Radisson Blu Plaza Hotel Mysore",
+                "category": "dining",
+                "lat": 12.2979,
+                "lng": 76.6667,
+                "duration_label": "1h 30m",
+                "description": "Effortless multi-cuisine buffet & live grills right inside the hotel so nobody steps back into traffic.",
+                "dietary_note": "Full Veg + Non-Veg spread (South Indian, kebabs, pastas, desserts).",
+                "kid_note": null,
+                "insider_tip": null
+              }
+            ]
+          },
+          {
+            "day_number": 2,
+            "date_label": "Tue, Dec 22",
+            "weekday": "Tuesday",
+            "headline": "Bandipur Forest Canopy Drive -> Wayanad Coffee-Estate Villa",
+            "corridor_tag": "NH766 Forest Corridor \u00b7 138 km",
+            "drive_km": 138.0,
+            "drive_time_label": "3h 30m",
+            "overnight_label": "\"Brookview\" Tranquil Coffee Chalet",
+            "stops": [
+              {
+                "id": "d2-s1",
+                "time_window": "9:30 AM \u2013 12:15 PM",
+                "title": "Morning Forest Corridor Drive: Mysuru -> Sultan Bathery",
+                "location_label": "NH766 \u00b7 Bandipur & Muthanga Tiger Reserves (115 km)",
+                "category": "drive",
+                "lat": 11.6662,
+                "lng": 76.6345,
+                "duration_label": "2h 45m",
+                "description": "After Radisson's Super Breakfast, exit southern Mysuru straight onto NH766. Cruise slowly through 30 km of Bandipur\u2013Muthanga forest canopy.",
+                "dietary_note": null,
+                "kid_note": "High Jeep Meridian windows give effortless roadside sightings of spotted deer, peacocks, langurs, and wild elephants \u2014 no formal safari required.",
+                "insider_tip": "Keep speed <=40 km/h over forest humps; stopping or feeding wildlife is strictly fined."
+              },
+              {
+                "id": "d2-s2",
+                "time_window": "12:15 PM \u2013 1:20 PM",
+                "title": "Highway Family Lunch at The Wilton Restaurant",
+                "location_label": "Sultan Bathery (Right on NH766)",
+                "category": "dining",
+                "lat": 11.665,
+                "lng": 76.257,
+                "duration_label": "1h 05m",
+                "description": "Spacious, spotless AC family landmark right as you enter Wayanad.",
+                "dietary_note": "Must-order: Malabar Chicken/Mutton Biryani, Tawa Fish Fry, and crisp North/South Indian Veg platters.",
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d2-s3",
+                "time_window": "2:00 PM",
+                "title": "Check-in at \"Brookview\" Tranquil Coffee Chalet",
+                "location_label": "Kalpetta \u2013 Kottur River Estate Belt",
+                "category": "stay",
+                "lat": 11.589,
+                "lng": 76.074,
+                "duration_label": "3-Night Family Base",
+                "description": "Settle into your 2 BHK villa. Kids get room to roam, swim, and play board games.",
+                "dietary_note": null,
+                "kid_note": "River-rapids nature trail inside the estate, coffee & pepper bush walks, campfire pit, and pool.",
+                "insider_tip": null
+              },
+              {
+                "id": "d2-s4",
+                "time_window": "4:30 PM \u2013 6:00 PM",
+                "title": "Guided Coffee, Black Pepper & Cardamom Estate Walk",
+                "location_label": "On-Estate Plantation Trails",
+                "category": "nature",
+                "lat": 11.593,
+                "lng": 76.078,
+                "duration_label": "1h 30m",
+                "description": "Easy first-evening plantation stroll seeing Arabica/Robusta coffee berries, pepper vines, and cocoa pods, followed by homestyle Kerala dinner at the villa.",
+                "dietary_note": "Villa dinner: Hot Appams + Vegetable Stew + Nadan Chicken Roast.",
+                "kid_note": null,
+                "insider_tip": null
+              }
+            ]
+          },
+          {
+            "day_number": 3,
+            "date_label": "Wed, Dec 23",
+            "weekday": "Wednesday",
+            "headline": "Edakkal Stone-Age Climb, Phantom Rock & 1980's Kerala Feast",
+            "corridor_tag": "Ambalavayal \u2013 Kalpetta Loop \u00b7 72 km",
+            "drive_km": 72.0,
+            "drive_time_label": "2h 05m total",
+            "overnight_label": "\"Brookview\" Tranquil Coffee Chalet",
+            "stops": [
+              {
+                "id": "d3-s1",
+                "time_window": "9:15 AM \u2013 11:30 AM",
+                "title": "Moderate Climb #1: Edakkal Caves (Neolithic Petroglyphs)",
+                "location_label": "Ambukuthi Mala, Ambalavayal",
+                "category": "climb",
+                "lat": 11.6265,
+                "lng": 76.2345,
+                "duration_label": "2h 15m",
+                "description": "Steep paved hill walk + ~300 rock-cut steps and iron ladders wedged between giant split boulders revealing 6,000-year-old Stone Age carvings.",
+                "dietary_note": null,
+                "kid_note": "Thrilling boulder-cleft climb for ages 8 & 10 with panoramic Wayanad plateau views at the top.",
+                "insider_tip": "Arriving by 9:15 AM beats Christmas-week ticket queues by 60+ minutes and avoids midday sun."
+              },
+              {
+                "id": "d3-s2",
+                "time_window": "11:45 AM \u2013 12:30 PM",
+                "title": "Short Rock Scramble: Phantom Rock (Cheengeri Mala)",
+                "location_label": "Ambalavayal (15 mins from Edakkal)",
+                "category": "climb",
+                "lat": 11.6378,
+                "lng": 76.2055,
+                "duration_label": "45m",
+                "description": "Natural skull-shaped metamorphic rock formation with gentle, grippy boulder slabs and sweeping valley breezes.",
+                "dietary_note": null,
+                "kid_note": "Easy 20-minute scramble with great family photo vantage points.",
+                "insider_tip": null
+              },
+              {
+                "id": "d3-s3",
+                "time_window": "1:15 PM \u2013 2:30 PM",
+                "title": "Signature Kerala Feast at 1980's \u2013 A Nostalgic Restaurant",
+                "location_label": "Kalpetta / Meppadi",
+                "category": "dining",
+                "lat": 11.5882,
+                "lng": 76.0915,
+                "duration_label": "1h 15m",
+                "description": "Set inside a vintage Kerala ancestral home with 80s memorabilia and warm family hospitality.",
+                "dietary_note": "Veg + Non-Veg: Banana-leaf Kerala Sadhya meals, Meen Pollichathu (fish roasted in banana leaf), Nadan Chicken Curry, Prawn Roast & Sulaimani tea.",
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d3-s4",
+                "time_window": "3:00 PM \u2013 4:15 PM",
+                "title": "Uravu Indigenous Bamboo Craft Village",
+                "location_label": "Thrikkaipetta",
+                "category": "heritage",
+                "lat": 11.568,
+                "lng": 76.1365,
+                "duration_label": "1h 15m",
+                "description": "Calm open-air artisan centre where kids watch craftspeople turn giant Wayanad bamboo into architecture, toys, and puzzles \u2014 zero theme-park crowds.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": "Pick up hand-carved bamboo brain-teaser puzzles for the kids for the drive home."
+              }
+            ]
+          },
+          {
+            "day_number": 4,
+            "date_label": "Thu, Dec 24",
+            "weekday": "Christmas Eve",
+            "headline": "Soochipara Waterfall Steps, Tea Ridges, En Ooru & Villa BBQ",
+            "corridor_tag": "Meppadi \u2013 Lakkidi Loop \u00b7 68 km",
+            "drive_km": 68.0,
+            "drive_time_label": "2h 00m total",
+            "overnight_label": "\"Brookview\" Tranquil Coffee Chalet",
+            "stops": [
+              {
+                "id": "d4-s1",
+                "time_window": "9:00 AM \u2013 11:30 AM",
+                "title": "Moderate Climb #2: Soochipara (Sentinel Rock) Waterfalls",
+                "location_label": "Meppadi Forest Range",
+                "category": "climb",
+                "lat": 11.5122,
+                "lng": 76.1632,
+                "duration_label": "2h 30m",
+                "description": "Scenic ~1.2 km stone-stepped forest descent & climb back up (25 mins each way through tea estates and deciduous canopy) to a dramatic 200-ft 3-tiered waterfall.",
+                "dietary_note": null,
+                "kid_note": "Great leg-stretching forest step climb (no water rides). Lighter backup 15 mins away: Kanthanpara Waterfalls.",
+                "insider_tip": "Carry reusable metal water bottles \u2014 forest checkpost prohibits single-use plastic bottles."
+              },
+              {
+                "id": "d4-s2",
+                "time_window": "11:45 AM \u2013 12:45 PM",
+                "title": "Meppadi & Arapetta Tea-Estate Ridge Walk",
+                "location_label": "Ripon / Meppadi Tea Hills",
+                "category": "nature",
+                "lat": 11.554,
+                "lng": 76.1342,
+                "duration_label": "1h 00m",
+                "description": "Gentle walk along manicured green tea-picker ridges framed by mist-draped Chembra Peak.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d4-s3",
+                "time_window": "1:15 PM \u2013 2:30 PM",
+                "title": "Rustic Village Lunch at ClayHut Restaurant",
+                "location_label": "Kalpetta Bypass",
+                "category": "dining",
+                "lat": 11.604,
+                "lng": 76.0835,
+                "duration_label": "1h 15m",
+                "description": "Cozy open-air clay and bamboo huts tucked inside lush greenery.",
+                "dietary_note": "Homestyle Kerala Veg curries, coconut-oil tawa fish fry, country chicken roast & flaky Malabar parottas.",
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d4-s4",
+                "time_window": "3:15 PM \u2013 4:45 PM",
+                "title": "En Ooru Tribal Heritage Village & Lakkidi Viewpoint",
+                "location_label": "Pookode / Lakkidi Ghat Crest",
+                "category": "heritage",
+                "lat": 11.5342,
+                "lng": 76.0235,
+                "duration_label": "1h 30m",
+                "description": "Walk an open-air hilltop tribal hamlet showcasing indigenous mud-and-thatch architecture, tribal crafts, and sweeping valley vistas, ending with sunset over Thamarassery Ghat.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": "7:30 PM Christmas Eve back at your private villa: pre-order a garden bonfire + Veg/Chicken/Fish BBQ under the stars."
+              }
+            ]
+          },
+          {
+            "day_number": 5,
+            "date_label": "Fri, Dec 25",
+            "weekday": "Christmas Day",
+            "headline": "Slow Villa Morning -> Early-Afternoon Return to Radisson Mysore",
+            "corridor_tag": "NH766 Daylight Return \u00b7 138 km",
+            "drive_km": 138.0,
+            "drive_time_label": "3h 25m",
+            "overnight_label": "Radisson Blu Plaza Hotel Mysore",
+            "stops": [
+              {
+                "id": "d5-s1",
+                "time_window": "8:30 AM \u2013 11:30 AM",
+                "title": "Unhurried Christmas Morning at the Villa",
+                "location_label": "\"Brookview\" Tranquil Coffee Chalet",
+                "category": "stay",
+                "lat": 11.589,
+                "lng": 76.074,
+                "duration_label": "Morning",
+                "description": "Sleep in, enjoy slow Christmas breakfast on the veranda, one final dip in the pool, and pack at an easy family pace.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d5-s2",
+                "time_window": "12:15 PM \u2013 1:15 PM",
+                "title": "Early-Afternoon Return Lunch at Mathai's Restocafe",
+                "location_label": "Sultan Bathery",
+                "category": "dining",
+                "lat": 11.662,
+                "lng": 76.261,
+                "duration_label": "1h 00m",
+                "description": "Airy modern family restocafe right on NH766 before entering the forest checkpost.",
+                "dietary_note": "Pastas/continental kid favorites alongside Kerala Veg & Non-Veg specials (Alt: Hotel Udupi for crisp dosas).",
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d5-s3",
+                "time_window": "1:15 PM \u2013 4:30 PM",
+                "title": "Daylight Forest Drive Back to Radisson Blu Mysore",
+                "location_label": "Sultan Bathery -> Muthanga -> Bandipur -> Mysuru (115 km)",
+                "category": "drive",
+                "lat": 11.8082,
+                "lng": 76.6895,
+                "duration_label": "3h 15m",
+                "description": "Cross Muthanga & Bandipur ~1:35\u20132:45 PM in bright daylight, pulling into Radisson Blu Plaza Mysore by 4:30 PM for a festive Christmas evening buffet & deep rest.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              }
+            ]
+          },
+          {
+            "day_number": 6,
+            "date_label": "Sat, Dec 26",
+            "weekday": "Saturday",
+            "headline": "Unhurried Mysuru Lunch -> Afternoon Cruise Home to Koramangala",
+            "corridor_tag": "NH275 Expressway \u00b7 162 km",
+            "drive_km": 162.0,
+            "drive_time_label": "3h 15m",
+            "overnight_label": "Home \u00b7 Koramangala",
+            "stops": [
+              {
+                "id": "d6-s1",
+                "time_window": "8:30 AM \u2013 12:00 PM",
+                "title": "Lazy Radisson Morning & Super Breakfast",
+                "location_label": "Radisson Blu Plaza Hotel Mysore",
+                "category": "stay",
+                "lat": 12.2979,
+                "lng": 76.6667,
+                "duration_label": "Morning",
+                "description": "Sleep in, enjoy the full breakfast spread and pool/lounge, and check out at 12:00 PM.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d6-s2",
+                "time_window": "12:30 PM \u2013 1:45 PM",
+                "title": "Farewell Lunch at The Old House (or Hotel RRR)",
+                "location_label": "Mysuru (Zero-Sightseeing Culinary Stop, 7 mins away)",
+                "category": "dining",
+                "lat": 12.3095,
+                "lng": 76.649,
+                "duration_label": "1h 15m",
+                "description": "Leafy heritage bungalow cafe serving wood-fired pizzas, handmade pastas & salads kids love \u2014 or pick Hotel RRR for iconic banana-leaf biryani & veg meals.",
+                "dietary_note": "Both Veg & Non-Veg; light and comfortable right before the afternoon highway run.",
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "d6-s3",
+                "time_window": "2:00 PM \u2013 5:15 PM",
+                "title": "Post-Lunch Expressway Return to Koramangala",
+                "location_label": "NH275 Expressway -> NICE Road -> Electronic City -> Koramangala",
+                "category": "drive",
+                "lat": 12.9352,
+                "lng": 77.6245,
+                "duration_label": "3h 15m",
+                "description": "Smooth Saturday afternoon cruise back home on NH275, arriving in Koramangala by ~5:15\u20135:30 PM.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "goa": {
+    "trip_spec": {
+      "origin": "Koramangala, Bengaluru",
+      "destination": "Assagao & Aldona, North Goa",
+      "start_date": "2027-01-14",
+      "end_date": "2027-01-18",
+      "departure_time_pref": "Morning flight BLR -> GOX (Mopa)",
+      "return_timing_pref": "Evening flight GOI/GOX -> BLR",
+      "transport_mode": "hybrid",
+      "stay_strategy": "villas",
+      "vehicle_name": "Self-Drive Automatic SUV Rental at Mopa Airport (GOX)",
+      "destination_villa_bhk": 3,
+      "nightly_budget_min_inr": 22000,
+      "nightly_budget_max_inr": 32000,
+      "party": {
+        "adults": 2,
+        "children": 2,
+        "child_ages": [
+          8,
+          10
+        ],
+        "room_setup": "3 BHK Private Pool Villa by The Blue Kite"
+      },
+      "pinned_stays": [],
+      "activities": {
+        "wildlife_safari": false,
+        "adventure_water": false,
+        "moderate_climbs": true,
+        "transit_sightseeing": true,
+        "dietary": "both",
+        "pace": "relaxed"
+      }
+    },
+    "platform_coverage": [
+      {
+        "platform": "The Blue Kite",
+        "status": "matched",
+        "listings_scanned": 34,
+        "note": "Direct Vianaar/Blue Kite inventory matched in Assagao, Vagator, Anjuna & Parra \u2014 lowest all-in price."
+      },
+      {
+        "platform": "Airbnb",
+        "status": "matched",
+        "listings_scanned": 112,
+        "note": "Deduplicated 19 identical Blue Kite & boutique villas listed with +14.2% guest fee markup."
+      },
+      {
+        "platform": "Flights (LCC + Full-Service)",
+        "status": "live_scanned",
+        "listings_scanned": 48,
+        "note": "Compared BLR->GOX vs. BLR->GOI across IndiGo, Akasa Air, Air India & Air India Express."
+      }
+    ],
+    "tool_trace": [
+      {
+        "phase": "Phase 1 \u00b7 Intent & Constraints",
+        "tool_name": "gateway_airport_arbitrage",
+        "status": "completed",
+        "latency_ms": 180,
+        "input_summary": "BLR -> North Goa (4 pax: 2A + 2C) \u00b7 Compare GOX Mopa vs GOI Dabolim + Rental SUV",
+        "finding_summary": "GOX saves \u20b96,200 on airfare + 45 mins drive to Assagao vs GOI."
+      },
+      {
+        "phase": "Phase 2 \u00b7 Multi-Channel Arbitrage",
+        "tool_name": "bluekite_vs_airbnb_entity_matcher",
+        "status": "completed",
+        "latency_ms": 340,
+        "input_summary": "3 BHK Pool Villas in Assagao/Siolim across thebluekite.com, Airbnb, MakeMyTrip",
+        "finding_summary": "Matched 'La Soria by The Blue Kite': \u20b999,600 direct vs \u20b9116,000 on Airbnb (saves \u20b916,400)."
+      },
+      {
+        "phase": "Phase 3 \u00b7 Spatio-Temporal Solver",
+        "tool_name": "hybrid_fly_drive_dag_solver",
+        "status": "completed",
+        "latency_ms": 210,
+        "input_summary": "Synthesize flight + GOX self-drive SUV + 4N villa + hinterland climbs/ferries",
+        "finding_summary": "Total landed core \u20b9144,110 (saves \u20b922,600 vs unoptimized OTA + Goa cabs)."
+      }
+    ],
+    "blueprints": [
+      {
+        "id": "goa-hybrid-sweetspot",
+        "rank_badge": "Hybrid Fly + Drive Showcase",
+        "name": "Smart-Hub GOX + The Blue Kite Direct Arbitrage",
+        "strategy_subtitle": "Fly BLR->GOX + Self-Drive SUV + La Soria 3BHK Villa (Direct Portal)",
+        "recommended": true,
+        "total_core_landed_inr": 144110,
+        "unoptimized_baseline_inr": 166710,
+        "total_arbitrage_savings_inr": 22600,
+        "dining_and_activities_est_inr": 22000,
+        "fatigue_score": 22,
+        "quality_score": 97,
+        "deal_anomaly_score": 96.5,
+        "stays": [
+          {
+            "id": "goa-bluekite-la-soria",
+            "name": "La Soria by The Blue Kite",
+            "subtitle": "Assagao, North Goa \u00b7 3 BHK Portuguese-Modern Private Pool Villa",
+            "category": "bluekite",
+            "city": "North Goa",
+            "micro_region": "Assagao (28 mins south of Mopa GOX Airport)",
+            "lat": 15.5939,
+            "lng": 73.7867,
+            "rating": 4.93,
+            "review_count": 164,
+            "bedrooms_label": "3 BHK Villa + Private Plunge Pool + Concierge",
+            "check_in": "2027-01-14",
+            "check_out": "2027-01-18",
+            "nights": 4,
+            "image_url": "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1000&q=80",
+            "suv_access_note": "28-min NH66 drive from Mopa (GOX) vs. 75-min traffic crawl from Dabolim (GOI).",
+            "kid_fit_note": "Private gated pool, Vianaar housekeeping & chef-on-call, quiet Assagao forested lane.",
+            "highlights": [
+              "Matched identical villa across thebluekite.com, Airbnb, and MakeMyTrip",
+              "Booking direct on The Blue Kite saves \u20b916,400 over Airbnb's syndicated total",
+              "Gateway Hub Arbitrage: Flying into Mopa (GOX) saves \u20b96,200 + cuts transfer time in half"
+            ],
+            "offers": [
+              {
+                "platform": "The Blue Kite Direct",
+                "channel_type": "villa_portal",
+                "base_total_inr": 88000,
+                "extra_bed_or_addons_inr": 0,
+                "platform_or_cleaning_fee_inr": 0,
+                "taxes_gst_inr": 15840,
+                "promo_discount_inr": 4240,
+                "landed_total_inr": 99600,
+                "per_night_landed_inr": 24900,
+                "inclusions": [
+                  "Private Pool",
+                  "Daily Housekeeping",
+                  "Direct Concierge"
+                ],
+                "promo_note": "Direct Vianaar / Blue Kite portal rate \u2014 zero OTA commission markup",
+                "booking_url": "https://www.thebluekite.com/",
+                "is_best_deal": true
+              },
+              {
+                "platform": "MakeMyTrip",
+                "channel_type": "ota",
+                "base_total_inr": 94000,
+                "extra_bed_or_addons_inr": 0,
+                "platform_or_cleaning_fee_inr": 1200,
+                "taxes_gst_inr": 16920,
+                "promo_discount_inr": 4500,
+                "landed_total_inr": 107620,
+                "per_night_landed_inr": 26905,
+                "inclusions": [
+                  "Private Pool",
+                  "Housekeeping"
+                ],
+                "promo_note": "OTA markup partially offset by bank card offer",
+                "booking_url": "https://www.makemytrip.com/",
+                "is_best_deal": false
+              },
+              {
+                "platform": "Airbnb",
+                "channel_type": "airbnb",
+                "base_total_inr": 96000,
+                "extra_bed_or_addons_inr": 0,
+                "platform_or_cleaning_fee_inr": 13900,
+                "taxes_gst_inr": 6100,
+                "promo_discount_inr": 0,
+                "landed_total_inr": 116000,
+                "per_night_landed_inr": 29000,
+                "inclusions": [
+                  "Entire Villa",
+                  "Pool"
+                ],
+                "promo_note": "Includes ~14.2% Airbnb service fee on identical Blue Kite listing",
+                "booking_url": "https://www.airbnb.co.in/",
+                "is_best_deal": false
+              }
+            ],
+            "best_channel": "The Blue Kite Direct",
+            "best_landed_inr": 99600,
+            "worst_landed_inr": 116000,
+            "savings_inr": 16400,
+            "deal_anomaly_score": 96.5,
+            "anomaly_badge": "Saves \u20b916,400 on The Blue Kite Direct vs. Airbnb"
+          }
+        ],
+        "flights": [
+          {
+            "id": "flt-blr-gox-akasa",
+            "carrier": "Akasa Air / IndiGo Split Virtual Interline",
+            "flight_numbers": "QP 1382 (Out) \u00b7 6E 6145 (Return)",
+            "route_label": "BLR -> GOX (Mopa North Goa) \u00b7 Return GOX -> BLR",
+            "gateway_hub_note": "Mopa (GOX) is 22 km from Assagao vs. 46 km from Dabolim (GOI) and \u20b96,200 cheaper for 4 seats.",
+            "depart_time": "10:15 AM",
+            "arrive_time": "11:35 AM",
+            "duration": "1h 20m Non-Stop",
+            "stops_label": "Non-Stop (Smart Hub GOX)",
+            "landed_family_total_inr": 31400,
+            "ota_unoptimized_inr": 37600,
+            "savings_inr": 6200,
+            "booking_channel": "Airline Direct Split-Ticket (Family Fare + 15kg\u00d74 Bags)"
+          }
+        ],
+        "road": {
+          "vehicle": "Self-Drive Hyundai Alcazar / Creta Automatic (GOX Terminal Pickup)",
+          "ground_clearance_mm": 195,
+          "total_distance_km": 190.0,
+          "total_drive_hours": 5.2,
+          "estimated_fuel_liters": 18.0,
+          "fuel_cost_inr": 1750,
+          "fastag_and_forest_tolls_inr": 160,
+          "rental_car_cost_inr": 11200,
+          "total_road_cost_inr": 13110,
+          "corridor_notes": [
+            "Airport terminal pickup at GOX avoids \u20b93,200\u00d72 Goa taxi union transfers + unlocks Chorla/Divar day drives."
+          ],
+          "segments": [
+            {
+              "id": "gox-assagao",
+              "day_number": 1,
+              "from_name": "Manohar Intl Airport (GOX, Mopa)",
+              "to_name": "La Soria by The Blue Kite, Assagao",
+              "highway_label": "NH66 Mapusa\u2013Assagao Corridor",
+              "distance_km": 24.0,
+              "duration_mins": 32,
+              "fastag_toll_inr": 40,
+              "fuel_estimate_inr": 250,
+              "gate_alert": null,
+              "coordinates": [
+                [
+                  73.8617,
+                  15.7308
+                ],
+                [
+                  73.813,
+                  15.602
+                ],
+                [
+                  73.7867,
+                  15.5939
+                ]
+              ]
+            },
+            {
+              "id": "assagao-divar-oldgoa",
+              "day_number": 2,
+              "from_name": "Assagao",
+              "to_name": "Aldona Backwaters \u00b7 Divar Island Ferry \u00b7 Reis Magos Fort",
+              "highway_label": "Hinterland Scenic Loop",
+              "distance_km": 68.0,
+              "duration_mins": 115,
+              "fastag_toll_inr": 0,
+              "fuel_estimate_inr": 620,
+              "gate_alert": null,
+              "coordinates": [
+                [
+                  73.7867,
+                  15.5939
+                ],
+                [
+                  73.8732,
+                  15.5912
+                ],
+                [
+                  73.9025,
+                  15.525
+                ],
+                [
+                  73.8095,
+                  15.4965
+                ],
+                [
+                  73.7867,
+                  15.5939
+                ]
+              ]
+            }
+          ]
+        },
+        "arbitrage_callouts": [
+          "The Blue Kite Direct vs. Airbnb: Exact same Assagao 3BHK pool villa costs \u20b916,400 less booked direct.",
+          "Gateway Hub Arbitrage: Landing at Mopa (GOX) instead of Dabolim (GOI) saves \u20b96,200 across 4 seats and drops you 28 mins from Assagao.",
+          "Self-Drive SUV at GOX Terminal: \u20b911,200 for 4 days beats point-to-point Goa cab rates while unlocking hinterland islands & forts."
+        ],
+        "days": [
+          {
+            "day_number": 1,
+            "date_label": "Thu, Jan 14",
+            "weekday": "Thursday",
+            "headline": "Fly BLR -> GOX Mopa + Self-Drive SUV to The Blue Kite Villa, Assagao",
+            "corridor_tag": "1h 20m Flight + 28m Drive",
+            "drive_km": 24.0,
+            "drive_time_label": "32m",
+            "overnight_label": "La Soria by The Blue Kite",
+            "stops": [
+              {
+                "id": "g1",
+                "time_window": "10:15 AM \u2013 11:35 AM",
+                "title": "Smart-Hub Flight: Bengaluru (BLR) -> Mopa (GOX)",
+                "location_label": "BLR T2 -> GOX North Goa",
+                "category": "flight",
+                "lat": 15.7308,
+                "lng": 73.8617,
+                "duration_label": "1h 20m",
+                "description": "Gateway arbitrage selects GOX over GOI, saving \u20b96,200 on 4 tickets and halving transfer time to North Goa.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              },
+              {
+                "id": "g2",
+                "time_window": "1:00 PM",
+                "title": "Lunch at Gunpowder, Assagao + Check-in at La Soria (The Blue Kite)",
+                "location_label": "Assagao, North Goa",
+                "category": "stay",
+                "lat": 15.5939,
+                "lng": 73.7867,
+                "duration_label": "4-Night Villa Base",
+                "description": "Pick up your self-drive SUV right outside GOX arrivals, dine under heritage trees at Gunpowder, and check into your 3 BHK Blue Kite pool villa.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              }
+            ]
+          },
+          {
+            "day_number": 2,
+            "date_label": "Fri, Jan 15",
+            "weekday": "Friday",
+            "headline": "Chapora Fort Climb, Divar Island Ferry & Panjim Fontainhas Walk",
+            "corridor_tag": "North Goa Hinterland Loop \u00b7 68 km",
+            "drive_km": 68.0,
+            "drive_time_label": "1h 55m",
+            "overnight_label": "La Soria by The Blue Kite",
+            "stops": [
+              {
+                "id": "g3",
+                "time_window": "9:00 AM \u2013 11:00 AM",
+                "title": "Morning Rampart Walk: Reis Magos & Aguada Lighthouse",
+                "location_label": "Reis Magos, Bardez",
+                "category": "climb",
+                "lat": 15.4965,
+                "lng": 73.8095,
+                "duration_label": "2h 00m",
+                "description": "Restored 16th-century laterite fort climb overlooking the Mandovi estuary, followed by Goan Thali & seafood at Kokni Kanteen.",
+                "dietary_note": null,
+                "kid_note": null,
+                "insider_tip": null
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
