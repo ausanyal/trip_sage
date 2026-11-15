@@ -1,16 +1,22 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from catalog import build_goa_hybrid_bluekite_preset, default_wayanad_trip_spec
+from agent import process_chat_turn
 from models import ChatTurnRequest, ChatTurnResponse, OptimizationResponse, TripSpec
-from optimizer import optimize_generic_scenario, optimize_wayanad_scenario, process_chat_turn
+from solver.pareto_dag import solve_trip_pareto
 
 app = FastAPI(
     title="TripSage Multi-Modal Arbitrage & Itinerary Engine",
-    version="1.0.0",
-    description="Joint spatio-temporal travel optimizer across Flights, Self-Drive/Rental Cars, Hotels, Airbnb, and The Blue Kite.",
+    version="2.0.0",
+    description=(
+        "Destination-agnostic multi-phase planner and joint spatio-temporal optimizer "
+        "powered by Gemini API, Project OSRM highway routing, OpenStreetMap Overpass POIs, "
+        "live Blue Kite / hospitality discovery, and cross-channel landed-fee arbitrage."
+    ),
 )
 
 app.add_middleware(
@@ -23,46 +29,33 @@ app.add_middleware(
 
 
 @app.get("/api/health")
-def health_check() -> dict:
+async def health_check() -> dict:
+    has_gemini = bool((os.getenv("GEMINI_API_KEY") or "").strip())
     return {
         "status": "ok",
-        "engine": "TripSage Joint Spatio-Temporal DAG Solver v1.0",
-        "channels": [
-            "Airbnb",
-            "The Blue Kite",
-            "StayVista",
-            "SaffronStays",
-            "Radisson Direct",
-            "MakeMyTrip",
-            "Agoda",
-            "Booking.com",
-            "IndiGo / Air India / Akasa Virtual Interline",
+        "version": "2.0.0",
+        "engine": "TripSage Generic Spatio-Temporal DAG Solver",
+        "llm_planner": (
+            f"gemini_live ({os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')})"
+            if has_gemini
+            else "deterministic_nlp_fallback (set GEMINI_API_KEY in .env to enable Gemini LLM)"
+        ),
+        "live_providers": [
+            "OpenStreetMap Nominatim Geocoder",
+            "Project OSRM GeoJSON Highway Router",
+            "OpenStreetMap Overpass POI & Hospitality Scanner",
+            "The Blue Kite Live Web Scraper",
+            "Cross-Channel GST, Extra-Bed & Service-Fee Deduplicator",
+            "Multi-Airport Gateway & Virtual-Interline Flight Scorer",
         ],
     }
 
 
-@app.get("/api/presets/wayanad", response_model=OptimizationResponse)
-def get_wayanad_preset() -> OptimizationResponse:
-    spec = default_wayanad_trip_spec()
-    return optimize_wayanad_scenario(spec)
-
-
-@app.get("/api/presets/goa-hybrid", response_model=OptimizationResponse)
-def get_goa_hybrid_preset() -> OptimizationResponse:
-    spec, cov, traces, bps = build_goa_hybrid_bluekite_preset()
-    return OptimizationResponse(
-        trip_spec=spec,
-        platform_coverage=cov,
-        tool_trace=traces,
-        blueprints=bps,
-    )
-
-
 @app.post("/api/optimize", response_model=OptimizationResponse)
-def run_optimizer(spec: TripSpec) -> OptimizationResponse:
-    return optimize_generic_scenario(spec)
+async def run_optimizer(spec: TripSpec) -> OptimizationResponse:
+    return await solve_trip_pareto(spec)
 
 
 @app.post("/api/chat", response_model=ChatTurnResponse)
-def chat_turn(req: ChatTurnRequest) -> ChatTurnResponse:
-    return process_chat_turn(req)
+async def chat_turn(req: ChatTurnRequest) -> ChatTurnResponse:
+    return await process_chat_turn(req)

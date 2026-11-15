@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Literal, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -11,9 +11,9 @@ DietaryPreference = Literal["veg", "non_veg", "both"]
 
 class TravelParty(BaseModel):
     adults: int = 2
-    children: int = 2
-    child_ages: List[int] = Field(default_factory=lambda: [8, 10])
-    room_setup: str = "Deluxe Room + Extra Bed (Transit) · 2 BHK Private Villa (Destination)"
+    children: int = 0
+    child_ages: List[int] = Field(default_factory=list)
+    room_setup: str = "Standard Room / Entire Stay"
 
 
 class PinnedStaySpec(BaseModel):
@@ -22,7 +22,7 @@ class PinnedStaySpec(BaseModel):
     property_name: str
     check_in: str
     check_out: str
-    room_config: str
+    room_config: str = "Standard Room + Breakfast"
 
 
 class ActivityPreferences(BaseModel):
@@ -35,17 +35,17 @@ class ActivityPreferences(BaseModel):
 
 
 class TripSpec(BaseModel):
-    origin: str = "Koramangala, Bengaluru"
-    destination: str = "Wayanad, Kerala"
-    start_date: str = "2026-12-21"
-    end_date: str = "2026-12-26"
-    departure_time_pref: str = "2:00 PM from Koramangala"
-    return_timing_pref: str = "Early afternoon Wayanad -> Mysuru; post-lunch Mysuru -> Bengaluru"
+    origin: str
+    destination: str
+    start_date: str
+    end_date: str
+    departure_time_pref: str = "Morning departure"
+    return_timing_pref: str = "Afternoon return"
     transport_mode: TransportMode = "road"
     stay_strategy: StayStrategy = "hybrid"
-    vehicle_name: str = "Jeep Meridian SUV (Own Car)"
+    vehicle_name: str = "Self-Drive SUV"
     destination_villa_bhk: int = 2
-    nightly_budget_min_inr: int = 15000
+    nightly_budget_min_inr: int = 12000
     nightly_budget_max_inr: int = 20000
     party: TravelParty = Field(default_factory=TravelParty)
     pinned_stays: List[PinnedStaySpec] = Field(default_factory=list)
@@ -197,7 +197,11 @@ class ParetoBlueprint(BaseModel):
 
 
 class ToolCallTrace(BaseModel):
-    phase: Literal["Phase 1 · Intent & Constraints", "Phase 2 · Multi-Channel Arbitrage", "Phase 3 · Spatio-Temporal Solver"]
+    phase: Literal[
+        "Phase 1 · Intent & Constraints",
+        "Phase 2 · Multi-Channel Arbitrage",
+        "Phase 3 · Spatio-Temporal Solver",
+    ]
     tool_name: str
     status: Literal["completed", "pivoted"] = "completed"
     latency_ms: int

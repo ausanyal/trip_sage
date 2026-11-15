@@ -111,7 +111,7 @@ type ActiveTab = "itinerary" | "arbitrage" | "telemetry";
 type StopFilter = "all" | "climb" | "dining" | "stay_drive";
 
 export default function TripSageWorkspacePage() {
-  const [activePresetKey, setActivePresetKey] = useState<"wayanad" | "goa">("wayanad");
+  const [activePresetKey, setActivePresetKey] = useState<"wayanad" | "goa" | "custom">("wayanad");
   const [optimization, setOptimization] = useState<OptimizationResponse>(
     INITIAL_PRESETS.wayanad
   );
@@ -263,15 +263,7 @@ export default function TripSageWorkspacePage() {
             setOptimization(payload.optimization);
             setSelectedBlueprintIdx(0);
             setActiveDay(null);
-            if (
-              payload.updated_spec.destination.toLowerCase().includes("goa")
-            ) {
-              setActivePresetKey("goa");
-            } else if (
-              payload.updated_spec.destination.toLowerCase().includes("wayanad")
-            ) {
-              setActivePresetKey("wayanad");
-            }
+            setActivePresetKey("custom");
           }
           setMessages((prev) => [
             ...prev,
@@ -546,7 +538,7 @@ export default function TripSageWorkspacePage() {
                   )}
                 </div>
                 <div style={{ fontSize: "0.73rem", color: "var(--text-muted)" }}>
-                  + ~₹{blueprint.dining_and_activities_est_inr.toLocaleString("en-IN")} est. 6-day dining &amp; cave/falls tickets
+                  + ~₹{blueprint.dining_and_activities_est_inr.toLocaleString("en-IN")} est. {blueprint.days.length}-day dining &amp; activity tickets
                 </div>
               </div>
             </div>
@@ -732,9 +724,9 @@ export default function TripSageWorkspacePage() {
             >
               {(
                 [
-                  ["itinerary", `6-Day Family Itinerary (${blueprint.days.length} Days)`],
+                  ["itinerary", `${blueprint.days.length}-Day Curated Itinerary`],
                   ["arbitrage", `Cross-Channel Stay Arbitrage (${blueprint.stays.length} Stays)`],
-                  ["telemetry", "Jeep Meridian Road, Tolls & Forest Gates"],
+                  ["telemetry", `${optimization.trip_spec.vehicle_name.split("(")[0].trim()} Road, Tolls & Gates`],
                 ] as const
               ).map(([tabKey, label], idx) => {
                 const selected = activeTab === tabKey;
@@ -797,7 +789,7 @@ export default function TripSageWorkspacePage() {
                     type="search"
                     value={stopSearchQuery}
                     onChange={(e) => setStopSearchQuery(e.target.value)}
-                    placeholder="Filter climbs, Kerala restaurants, stops..."
+                    placeholder="Filter stops, trails, or restaurants..."
                     className="text-input"
                     style={{ inlineSize: "100%", paddingInlineStart: "2.2rem", minBlockSize: "2.4rem" }}
                   />
@@ -1198,7 +1190,7 @@ export default function TripSageWorkspacePage() {
                     ₹{blueprint.road.fastag_and_forest_tolls_inr.toLocaleString("en-IN")}
                   </div>
                   <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                    NICE Rd + NH275 + Bandipur/Muthanga
+                    {blueprint.road.segments[0]?.highway_label ?? "Highway & Corridor Plazas"}
                   </div>
                 </div>
               </div>

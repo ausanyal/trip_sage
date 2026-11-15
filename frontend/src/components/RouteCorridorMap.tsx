@@ -38,7 +38,7 @@ export function RouteCorridorMap({
   const padX = 64;
   const padY = 48;
 
-  const { project, segmentsProjected, stayPins, stopPins, bandipurBox } = useMemo(() => {
+  const { segmentsProjected, stayPins, stopPins, advisoryZone } = useMemo(() => {
     const allCoords: Array<[number, number]> = [];
 
     for (const seg of blueprint.road.segments) {
@@ -127,28 +127,32 @@ export function RouteCorridorMap({
       }
     }
 
-    // Check if Wayanad/Bandipur corridor is in bounds
-    const hasBandipur = blueprint.road.segments.some((s) =>
-      s.highway_label.toLowerCase().includes("bandipur")
+    // Generic highway / forest / ghat checkpost advisory zone derived from routed segment geometry
+    const gatedSeg = segs.find(
+      ({ seg, pts }) => Boolean(seg.gate_alert) && !seg.id.includes("local") && pts.length >= 2
     );
-    let bBox: { x: number; y: number; w: number; h: number } | null = null;
-    if (hasBandipur) {
-      const p1 = proj(76.34, 11.74);
-      const p2 = proj(76.68, 11.60);
-      bBox = {
-        x: Math.min(p1.x, p2.x),
-        y: Math.min(p1.y, p2.y),
-        w: Math.abs(p2.x - p1.x),
-        h: Math.abs(p2.y - p1.y),
+    let advZone: { x: number; y: number; w: number; h: number; label: string } | null = null;
+    if (gatedSeg && gatedSeg.seg.gate_alert) {
+      const midStart = Math.floor(gatedSeg.pts.length * 0.25);
+      const midEnd = Math.max(midStart + 1, Math.ceil(gatedSeg.pts.length * 0.75));
+      const slice = gatedSeg.pts.slice(midStart, midEnd + 1);
+      const xs = slice.map((p) => p.x);
+      const ys = slice.map((p) => p.y);
+      const shortAlert = gatedSeg.seg.gate_alert.split(".")[0].slice(0, 62);
+      advZone = {
+        x: Math.min(...xs),
+        y: Math.min(...ys),
+        w: Math.max(80, Math.max(...xs) - Math.min(...xs)),
+        h: Math.max(28, Math.max(...ys) - Math.min(...ys)),
+        label: shortAlert,
       };
     }
 
     return {
-      project: proj,
       segmentsProjected: segs,
       stayPins: sPins,
       stopPins: rawStops,
-      bandipurBox: bBox,
+      advisoryZone: advZone,
     };
   }, [blueprint, activeDay]);
 
@@ -279,28 +283,28 @@ export function RouteCorridorMap({
             stroke="rgba(52, 211, 153, 0.22)"
           />
 
-          {/* Bandipur - Muthanga Night-Ban Reserve Overlay */}
-          {bandipurBox && (
+          {/* Dynamic Corridor Checkpost / Ghat / Reserve Advisory Overlay */}
+          {advisoryZone && (
             <g>
               <rect
-                x={bandipurBox.x - 10}
-                y={bandipurBox.y - 16}
-                width={bandipurBox.w + 20}
-                height={bandipurBox.h + 32}
+                x={advisoryZone.x - 10}
+                y={advisoryZone.y - 16}
+                width={advisoryZone.w + 20}
+                height={advisoryZone.h + 32}
                 rx={12}
                 fill="rgba(245, 158, 11, 0.11)"
                 stroke="rgba(251, 191, 36, 0.48)"
                 strokeDasharray="5 4"
               />
               <text
-                x={bandipurBox.x + bandipurBox.w / 2}
-                y={bandipurBox.y - 22}
+                x={advisoryZone.x + advisoryZone.w / 2}
+                y={Math.max(18, advisoryZone.y - 22)}
                 textAnchor="middle"
                 fill="#fbbf24"
-                fontSize="10.5"
+                fontSize="10.2"
                 fontWeight="700"
               >
-                Bandipur–Muthanga Reserve (Closed 9 PM – 6 AM · Cleared Daytime)
+                {advisoryZone.label}
               </text>
             </g>
           )}
@@ -357,7 +361,7 @@ export function RouteCorridorMap({
             );
           })}
 
-          {/* Origin Marker (Koramangala / Origin) */}
+          {/* Origin Marker */}
           {segmentsProjected[0]?.pts[0] && (
             <g
               transform={`translate(${segmentsProjected[0].pts[0].x}, ${segmentsProjected[0].pts[0].y})`}
@@ -371,7 +375,7 @@ export function RouteCorridorMap({
                 fontSize="11.5"
                 fontWeight="700"
               >
-                Koramangala (Start 2 PM)
+                {segmentsProjected[0].seg.from_name}
               </text>
             </g>
           )}

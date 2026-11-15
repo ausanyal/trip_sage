@@ -20,9 +20,9 @@ interface ChatPlannerPaneProps {
 }
 
 const QUICK_PROMPTS = [
-  "Switch Wayanad villa to 3 BHK within 20-28k",
-  "Show Hybrid Fly + Drive to Goa with The Blue Kite",
-  "Add Mysore Palace illuminations on Dec 25",
+  "Plan a road trip from Mumbai to Mahabaleshwar in a 3 BHK villa",
+  "Plan a hybrid fly + drive trip from Bengaluru to Rishikesh",
+  "Switch villa to 3 BHK within 20-28k",
   "Switch dietary to pure veg",
 ];
 
