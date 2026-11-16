@@ -40,7 +40,7 @@ interface ProjectedPoint {
 
 const TILE_SIZE = 256;
 const MIN_ZOOM = 3;
-const MAX_ZOOM = 14;
+const MAX_ZOOM = 16;
 
 function clampLat(lat: number): number {
   return Math.max(-85.0511, Math.min(85.0511, lat));
@@ -210,15 +210,58 @@ export function RouteCorridorMap({
     }));
   }, []);
 
-  const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
-    if (!e.ctrlKey && !e.metaKey && Math.abs(e.deltaY) < 18) return;
-    e.preventDefault();
-    const dir = e.deltaY < 0 ? 1 : -1;
-    setView((prev) => ({
-      ...prev,
-      zoom: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.zoom + dir)),
-    }));
-  }, []);
+  const zoomAroundClientPoint = useCallback(
+    (clientX: number, clientY: number, delta: number) => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      setView((prev) => {
+        const nextZ = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.zoom + delta));
+        if (nextZ === prev.zoom || !rect || rect.width <= 0 || rect.height <= 0) {
+          return { ...prev, zoom: nextZ };
+        }
+        const relX = ((clientX - rect.left) / rect.width) * width;
+        const relY = ((clientY - rect.top) / rect.height) * height;
+        const offsetX = relX - width / 2;
+        const offsetY = relY - height / 2;
+
+        const clickedWx = lngToWorldX(prev.centerLng, prev.zoom) + offsetX;
+        const clickedWy = latToWorldY(prev.centerLat, prev.zoom) + offsetY;
+        const clickedLng = worldXToLng(clickedWx, prev.zoom);
+        const clickedLat = worldYToLat(clickedWy, prev.zoom);
+
+        const nextCenterWx = lngToWorldX(clickedLng, nextZ) - offsetX;
+        const nextCenterWy = latToWorldY(clickedLat, nextZ) - offsetY;
+
+        return {
+          centerLng: worldXToLng(nextCenterWx, nextZ),
+          centerLat: worldYToLat(nextCenterWy, nextZ),
+          zoom: nextZ,
+        };
+      });
+    },
+    []
+  );
+
+  const handleDoubleClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("[data-map-interactive='true']")) {
+        return;
+      }
+      e.preventDefault();
+      zoomAroundClientPoint(e.clientX, e.clientY, e.shiftKey ? -1 : 1);
+    },
+    [zoomAroundClientPoint]
+  );
+
+  const handleWheel = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      if (!e.ctrlKey && !e.metaKey && Math.abs(e.deltaY) < 18) return;
+      e.preventDefault();
+      const dir = e.deltaY < 0 ? 1 : -1;
+      zoomAroundClientPoint(e.clientX, e.clientY, dir);
+    },
+    [zoomAroundClientPoint]
+  );
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement | null;
@@ -488,6 +531,7 @@ export function RouteCorridorMap({
       {/* Hybrid Slippy Web Mercator Tile + Synchronized Vector Route Viewport */}
       <div
         ref={containerRef}
+        onDoubleClick={handleDoubleClick}
         onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -969,7 +1013,7 @@ export function RouteCorridorMap({
         ) : (
           <span style={{ color: "#94a3b8" }}>
             <Flame size={12} aria-hidden="true" style={{ display: "inline", marginInlineEnd: 4 }} />
-            Drag to pan · Click D1–D{blueprint.days.length} to auto-zoom corridor
+            Double-click to zoom · Drag to pan · Click D1–D{blueprint.days.length} to focus day
           </span>
         )}
       </div>
