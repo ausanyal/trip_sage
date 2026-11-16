@@ -345,18 +345,30 @@ export function RouteCorridorMap({
         ? blueprint.days
         : blueprint.days.filter((d) => d.day_number === activeDay);
 
-    const minPinGap = activeDay === null ? 36 : 18;
+    const originPt = segs[0]?.pts[0] ?? null;
+    const minPinGap = activeDay === null ? 42 : 20;
     const rawStops: Array<{ stop: TimelineStop; dayNumber: number; pt: ProjectedPoint }> = [];
     for (const d of relevantDays) {
       for (const st of d.stops) {
-        if (st.category === "stay") continue;
+        // Drive and flight legs are represented by corridor polylines — never plot midpoint pins
+        if (st.category === "stay" || st.category === "drive" || st.category === "flight") {
+          continue;
+        }
         const p = proj(st.lng, st.lat);
+        const collidesWithOrigin =
+          originPt !== null && Math.hypot(originPt.x - p.x, originPt.y - p.y) < 34;
         const collides =
+          collidesWithOrigin ||
           rawStops.some(
             (r) =>
               Math.hypot(r.pt.x - p.x, r.pt.y - p.y) < minPinGap ||
-              (Math.abs(r.pt.y - p.y) < 15 && Math.abs(r.pt.x - p.x) < 130)
-          ) || sPins.some((sp) => Math.hypot(sp.pt.x - p.x, sp.pt.y - p.y) < 26);
+              (Math.abs(r.pt.y - p.y) < 18 && Math.abs(r.pt.x - p.x) < 140)
+          ) ||
+          sPins.some(
+            (sp) =>
+              Math.hypot(sp.pt.x - p.x, sp.pt.y - p.y) < 34 ||
+              (Math.abs(sp.pt.y + 22 - p.y) < 20 && Math.abs(sp.pt.x - p.x) < 110)
+          );
         if (!collides) {
           rawStops.push({ stop: st, dayNumber: d.day_number, pt: p });
         }
@@ -364,21 +376,27 @@ export function RouteCorridorMap({
     }
 
     const gatedSeg = segs.find(
-      ({ seg, pts }) => Boolean(seg.gate_alert) && !seg.id.includes("vrptw") && !seg.id.includes("local") && pts.length >= 2
+      ({ seg, pts }) =>
+        Boolean(seg.gate_alert) &&
+        /(?:reserve|checkpost|ban|forest|ghat|wildlife|tiger)/i.test(seg.gate_alert ?? "") &&
+        !seg.id.includes("vrptw") &&
+        !seg.id.includes("local") &&
+        pts.length >= 2
     );
-    let advZone: { x: number; y: number; w: number; h: number; label: string } | null = null;
+    let advZone: { x: number; y: number; w: number; h: number; pillW: number; label: string } | null = null;
     if (gatedSeg && gatedSeg.seg.gate_alert) {
       const midStart = Math.floor(gatedSeg.pts.length * 0.25);
       const midEnd = Math.max(midStart + 1, Math.ceil(gatedSeg.pts.length * 0.75));
       const slice = gatedSeg.pts.slice(midStart, midEnd + 1);
       const xs = slice.map((p) => p.x);
       const ys = slice.map((p) => p.y);
-      const shortAlert = gatedSeg.seg.gate_alert.split(".")[0].slice(0, 62);
+      const shortAlert = gatedSeg.seg.gate_alert.split(" — ")[0].slice(0, 58);
       advZone = {
         x: Math.min(...xs),
         y: Math.min(...ys),
         w: Math.max(80, Math.max(...xs) - Math.min(...xs)),
         h: Math.max(28, Math.max(...ys) - Math.min(...ys)),
+        pillW: Math.max(190, Math.round(shortAlert.length * 5.8 + 24)),
         label: shortAlert,
       };
     }
@@ -594,12 +612,12 @@ export function RouteCorridorMap({
                 strokeDasharray="5 4"
               />
               <rect
-                x={advisoryZone.x + advisoryZone.w / 2 - 155}
+                x={advisoryZone.x + advisoryZone.w / 2 - advisoryZone.pillW / 2}
                 y={Math.max(6, advisoryZone.y - 34)}
-                width={310}
+                width={advisoryZone.pillW}
                 height={18}
                 rx={5}
-                fill="rgba(8, 17, 30, 0.85)"
+                fill="rgba(8, 17, 30, 0.88)"
               />
               <text
                 x={advisoryZone.x + advisoryZone.w / 2}

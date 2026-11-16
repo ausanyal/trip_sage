@@ -421,6 +421,7 @@ export default function TripSageWorkspacePage() {
                         role?: "user" | "assistant";
                         content?: string;
                         extracted_updates?: string[];
+                        follow_up_questions?: string[];
                       },
                       i: number
                     ) => ({
@@ -429,6 +430,7 @@ export default function TripSageWorkspacePage() {
                       timestamp: "Saved Permalink",
                       content: String(m.content ?? ""),
                       extracted_updates: m.extracted_updates,
+                      follow_up_questions: m.follow_up_questions,
                     })
                   )
                 : buildWelcomeConversation();

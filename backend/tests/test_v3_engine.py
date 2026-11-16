@@ -257,6 +257,63 @@ class TestTripSageV3Engine(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(spec_in.destination, "Gokarna")
         self.assertIsNone(spec_in.currency)
 
+    def test_multi_clause_conversational_prompt_and_followup_answers(self) -> None:
+        blank_spec = TripSpec(
+            origin="Bengaluru",
+            destination="Coorg",
+            start_date="2026-11-30",
+            end_date="2026-12-04",
+            stay_strategy="villas",
+            pinned_stays=[],
+        )
+        rich_prompt = (
+            "I want to plan a road trip with my family of 4 (2 adults and 2 kids of age 8 and 10).\n"
+            "We are traveling from koramangala, bangalore and we intend to go to wayanad, kerala from 12/21 to 12/26\n"
+            "on our way we would like to stay at radisson, mysore on 12/21 and one our way back we will again stay in this hotel on 12/25 and return on 12/26 back home.\n"
+            "for wayanad, we would prefer airbnb vs hotel as we have kids and we would like you to act as a travel agent expert who would plan our days in wayanad on what to do, where to visit and what to eat, we eat both veg and non-veg and we are ok with high end stays.\n"
+            "we have our own car.\n"
+            "ask questions if any to help plan this trip for us"
+        )
+        turn1_spec, turn1_updates, turn1_questions = _deterministic_nlp_extract(
+            ChatTurnRequest(message=rich_prompt, current_spec=blank_spec)
+        )
+        self.assertEqual(turn1_spec.origin, "Koramangala, Bangalore")
+        self.assertEqual(turn1_spec.destination, "Wayanad, Kerala")
+        self.assertEqual(len(turn1_spec.pinned_stays), 2)
+        self.assertEqual(turn1_spec.pinned_stays[0].city, "Mysore")
+        self.assertEqual(turn1_spec.pinned_stays[0].property_name, "Radisson Mysore")
+        self.assertEqual(turn1_spec.pinned_stays[0].check_in, "2026-12-21")
+        self.assertEqual(turn1_spec.pinned_stays[1].check_in, "2026-12-25")
+        self.assertEqual(turn1_spec.stay_strategy, "hybrid")
+        self.assertEqual(turn1_spec.party.adults, 2)
+        self.assertEqual(turn1_spec.party.children, 2)
+        self.assertEqual(turn1_spec.party.child_ages, [8, 10])
+        self.assertGreaterEqual(len(turn1_questions), 3)
+        self.assertTrue(any("Transit Stays" in u for u in turn1_updates))
+
+        # Turn 2: User answers the clarifying questions in a numbered list
+        followup = (
+            "1. Deluxe Room + extra bed\n"
+            "2. 2 bhk, within 15-20k per night\n"
+            "3. Jeep Meridian SUV\n"
+            "4. (a) Wildlife Safari: No (b) Adventure & Water: No (c) Moderate Climbs: Yes (d) Mysuru Stops: No\n"
+            "5. 2pm and we would leave Wayanad for Mysore in early afternoon and back from Mysore to Bangalore after lunch"
+        )
+        turn2_spec, _, turn2_questions = _deterministic_nlp_extract(
+            ChatTurnRequest(message=followup, current_spec=turn1_spec)
+        )
+        self.assertEqual(turn2_spec.vehicle_name, "Jeep Meridian SUV")
+        self.assertEqual(turn2_spec.destination_villa_bhk, 2)
+        self.assertEqual(turn2_spec.nightly_budget_min_inr, 15000)
+        self.assertEqual(turn2_spec.nightly_budget_max_inr, 20000)
+        self.assertEqual(turn2_spec.pinned_stays[0].room_config, "Deluxe Room + Extra Bed")
+        self.assertFalse(turn2_spec.activities.wildlife_safari)
+        self.assertFalse(turn2_spec.activities.adventure_water)
+        self.assertTrue(turn2_spec.activities.moderate_climbs)
+        self.assertFalse(turn2_spec.activities.transit_sightseeing)
+        self.assertIn("2", turn2_spec.departure_time_pref)
+        self.assertEqual(turn2_questions, [])
+
     async def test_serpapi_live_hotel_adapter_parsing(self) -> None:
         os.environ["SERPAPI_API_KEY"] = "mock-serp-key"
         fake_serp_payload = {

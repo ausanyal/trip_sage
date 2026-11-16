@@ -27,6 +27,16 @@ const QUICK_PROMPTS = [
   "Switch dietary to pure veg",
 ];
 
+function renderFormattedText(raw: string): React.ReactNode {
+  const parts = raw.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    return <React.Fragment key={i}>{part}</React.Fragment>;
+  });
+}
+
 export function ChatPlannerPane({
   messages,
   isPlanning,
@@ -247,7 +257,7 @@ export function ChatPlannerPane({
                     color: "var(--text-primary)",
                   }}
                 >
-                  {m.content}
+                  {renderFormattedText(m.content)}
                 </div>
 
                 {m.follow_up_questions && m.follow_up_questions.length > 0 && (
@@ -263,7 +273,7 @@ export function ChatPlannerPane({
                     }}
                   >
                     {m.follow_up_questions.map((q, idx) => (
-                      <li key={idx}>{q}</li>
+                      <li key={idx}>{renderFormattedText(q)}</li>
                     ))}
                   </ol>
                 )}
