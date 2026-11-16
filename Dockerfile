@@ -14,24 +14,27 @@ RUN npm run build
 # ==============================================================================
 # Stage 2: Unified Cloud Run Production Image (FastAPI + Next.js on 0.0.0.0:$PORT)
 # ==============================================================================
-FROM python:3.11-slim-bookworm
+FROM node:22-bookworm-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     NEXT_TELEMETRY_DISABLED=1 \
     NODE_ENV=production \
+    NODE_OPTIONS="--max-old-space-size=256" \
     PORT=8080 \
     TRIPSAGE_DB_PATH=/tmp/tripsage.db \
     BACKEND_INTERNAL_URL=http://127.0.0.1:8000
 
-# Copy Node.js runtime from builder stage so no external apt repositories are required
-COPY --from=frontend-builder /usr/local/bin/node /usr/local/bin/node
+# Install Python 3.11 + pip + TLS root certificates on Debian Bookworm
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3 python3-pip ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Install FastAPI & Operations-Research Solver dependencies
 COPY backend/requirements.txt /app/backend/requirements.txt
-RUN pip install --no-cache-dir -r /app/backend/requirements.txt
+RUN pip3 install --no-cache-dir --break-system-packages -r /app/backend/requirements.txt
 
 # Copy backend source and compiled Next.js production artifacts
 COPY backend/ /app/backend/

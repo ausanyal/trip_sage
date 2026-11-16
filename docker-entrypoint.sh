@@ -6,7 +6,7 @@ export BACKEND_INTERNAL_URL="${BACKEND_INTERNAL_URL:-http://127.0.0.1:8000}"
 LISTEN_PORT="${PORT:-8080}"
 
 echo "[TripSage Cloud Run] Starting FastAPI VRPTW & Arbitrage Engine on 127.0.0.1:8000..."
-uvicorn main:app --app-dir /app/backend --host 127.0.0.1 --port 8000 &
+python3 -m uvicorn main:app --app-dir /app/backend --host 127.0.0.1 --port 8000 &
 BACKEND_PID=$!
 
 # Wait up to 15s for FastAPI health readiness before opening public Cloud Run port
