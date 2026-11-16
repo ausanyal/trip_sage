@@ -1,13 +1,16 @@
 "use client";
 
-import React, { useId, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowRight,
+  ArrowUpRight,
   Car,
   Compass,
   Hotel,
+  Pause,
   Plane,
+  Play,
   RefreshCw,
   ShieldCheck,
   Sparkles,
@@ -31,6 +34,37 @@ interface WelcomeQuickStartViewProps {
   onLaunchSpec: (spec: TripSpec, label: string) => void;
   onTryExample: (exampleKey: "wayanad" | "goa" | "mahabaleshwar") => void;
 }
+
+interface HorizonScene {
+  id: string;
+  label: string;
+  regionTag: string;
+  videoUrl: string;
+}
+
+const HORIZON_SCENES: HorizonScene[] = [
+  {
+    id: "summit",
+    label: "Golden Summit",
+    regionTag: "Highland Villas & Cloud Ridges",
+    videoUrl:
+      "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260405_170732_8a9ccda6-5cff-4628-b164-059c500a2b41.mp4",
+  },
+  {
+    id: "ghats",
+    label: "Misty Ghats",
+    regionTag: "Forest Corridors & Estate Drives",
+    videoUrl:
+      "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260511_131941_d136af49-e243-493a-be14-6ff3f24e09e6.mp4",
+  },
+  {
+    id: "valley",
+    label: "Starlit Valley",
+    regionTag: "Fly + Drive Alpine Horizons",
+    videoUrl:
+      "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260402_054547_9875cfc5-155a-4229-8ec8-b7ba7125cbf8.mp4",
+  },
+];
 
 const AUTO_FLIGHT_DEST_TOKENS = [
   "indonesia", "bali", "thailand", "phuket", "bangkok", "singapore",
@@ -73,6 +107,12 @@ export function WelcomeQuickStartView({
 }: WelcomeQuickStartViewProps) {
   const uid = useId();
   const formRef = useRef<HTMLFormElement | null>(null);
+  const videoRefs = useRef<Array<HTMLVideoElement | null>>([]);
+  const sceneCooldownRef = useRef<number | null>(null);
+
+  const [activeSceneIdx, setActiveSceneIdx] = useState<number>(0);
+  const [isTransitioningScene, setIsTransitioningScene] = useState<boolean>(false);
+  const [isVideoPaused, setIsVideoPaused] = useState<boolean>(false);
 
   const defaultDates = useMemo(
     () => ({
@@ -93,6 +133,50 @@ export function WelcomeQuickStartView({
   const [children, setChildren] = useState(2);
   const [villaBhk, setVillaBhk] = useState(2);
   const [maxNightlyInr, setMaxNightlyInr] = useState(20000);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (mq.matches) {
+      setIsVideoPaused(true);
+    }
+    const handleMotionPref = (ev: MediaQueryListEvent) => {
+      if (ev.matches) {
+        setIsVideoPaused(true);
+      }
+    };
+    mq.addEventListener("change", handleMotionPref);
+    return () => {
+      mq.removeEventListener("change", handleMotionPref);
+      if (sceneCooldownRef.current !== null) {
+        window.clearTimeout(sceneCooldownRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    videoRefs.current.forEach((vid, idx) => {
+      if (!vid) return;
+      vid.muted = true;
+      vid.playsInline = true;
+      if (idx === activeSceneIdx && !isVideoPaused) {
+        vid.play().catch(() => {});
+      } else {
+        vid.pause();
+      }
+    });
+  }, [activeSceneIdx, isVideoPaused]);
+
+  const handleSwitchScene = (nextIdx: number) => {
+    if (nextIdx === activeSceneIdx || isTransitioningScene) return;
+    setActiveSceneIdx(nextIdx);
+    setIsTransitioningScene(true);
+    if (sceneCooldownRef.current !== null) {
+      window.clearTimeout(sceneCooldownRef.current);
+    }
+    sceneCooldownRef.current = window.setTimeout(() => {
+      setIsTransitioningScene(false);
+    }, 650);
+  };
 
   const originId = `${uid}-origin`;
   const originErrId = `${uid}-origin-err`;
@@ -201,44 +285,254 @@ export function WelcomeQuickStartView({
     fxRates || DEFAULT_FX_RATES
   );
 
+  const activeScene = HORIZON_SCENES[activeSceneIdx] ?? HORIZON_SCENES[0];
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-      {/* Hero Banner */}
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.15rem" }}>
+      {/* Cinematic Inset Horizon Stage */}
+      <section className="ms-horizon-stage" aria-label="TripSage Multi-Modal Travel Engine">
+        {HORIZON_SCENES.map((scene, idx) => (
+          <video
+            key={scene.id}
+            ref={(el) => {
+              videoRefs.current[idx] = el;
+            }}
+            className="ms-horizon-video"
+            data-active={String(idx === activeSceneIdx)}
+            src={scene.videoUrl}
+            autoPlay={idx === 0}
+            muted
+            loop
+            playsInline
+            preload={idx === activeSceneIdx ? "auto" : "metadata"}
+            aria-hidden="true"
+          />
+        ))}
+        <div className="ms-horizon-scrim" aria-hidden="true" />
+        <div className="ms-noise-overlay" aria-hidden="true" />
+
+        {/* Top Bar: Liquid-Glass Solver Chip + Atmosphere Switcher & Motion Control */}
+        <div
+          className="ms-fade-rise"
+          style={{
+            ["--d" as string]: "60ms",
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "0.75rem",
+          }}
+        >
+          <div
+            className="liquid-glass"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.55rem",
+              borderRadius: "999px",
+              padding: "0.26rem 0.85rem 0.26rem 0.3rem",
+            }}
+          >
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.28rem",
+                background: "#ffffff",
+                color: "#06121c",
+                borderRadius: "999px",
+                padding: "0.22rem 0.62rem",
+                fontSize: "0.7rem",
+                fontWeight: 700,
+                letterSpacing: "0.02em",
+              }}
+            >
+              <Sparkles size={11} aria-hidden="true" /> v3.0 Engine
+            </span>
+            <span style={{ fontSize: "0.76rem", color: "rgba(248, 250, 252, 0.92)", fontWeight: 500 }}>
+              NSGA-II Pareto · OSRM 2-Opt VRPTW · Channel Arbitrage
+            </span>
+          </div>
+
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.45rem" }}>
+            <div
+              className="liquid-glass"
+              role="group"
+              aria-label="Select horizon atmosphere"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.15rem",
+                padding: "0.2rem",
+                borderRadius: "999px",
+              }}
+            >
+              {HORIZON_SCENES.map((sc, idx) => (
+                <button
+                  key={sc.id}
+                  type="button"
+                  className="ms-scene-pill"
+                  aria-pressed={idx === activeSceneIdx}
+                  onClick={() => handleSwitchScene(idx)}
+                >
+                  {sc.label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              className="liquid-glass"
+              aria-pressed={isVideoPaused}
+              aria-label={
+                isVideoPaused
+                  ? "Play ambient horizon video"
+                  : "Pause ambient horizon video"
+              }
+              title={isVideoPaused ? "Play ambient video" : "Pause ambient video"}
+              onClick={() => setIsVideoPaused((prev) => !prev)}
+              style={{
+                inlineSize: "2.35rem",
+                blockSize: "2.35rem",
+                borderRadius: "999px",
+                display: "grid",
+                placeItems: "center",
+                color: "#f8fafc",
+                cursor: "pointer",
+              }}
+            >
+              {isVideoPaused ? (
+                <Play size={14} aria-hidden="true" />
+              ) : (
+                <Pause size={14} aria-hidden="true" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Bottom-Anchored Editorial Headline + Proof Strip */}
+        <div
+          style={{
+            marginBlockStart: "clamp(0.85rem, 1.8vw, 1.45rem)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.7rem",
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            <h2
+              className="ms-hero-headline ms-blur-rise"
+              style={{ ["--d" as string]: "180ms" }}
+            >
+              Every journey hides a{" "}
+              <span className="ms-serif-accent">smarter edge.</span>
+            </h2>
+            <p
+              className="ms-hero-lede ms-fade-rise"
+              style={{ ["--d" as string]: "320ms" }}
+            >
+              Deduplicate private villas, transit hotels, and multi-gateway flights across
+              Airbnb, The Blue Kite, StayVista, and direct portals—paired with time-windowed
+              daily routing.
+            </p>
+          </div>
+
+          {/* Quiet Editorial Telemetry Strip */}
+          <div
+            className="ms-fade-rise"
+            style={{
+              ["--d" as string]: "440ms",
+              paddingBlockStart: "0.6rem",
+              borderBlockStart: "1px solid rgba(255, 255, 255, 0.14)",
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "0.5rem",
+              fontSize: "0.73rem",
+              color: "rgba(226, 232, 240, 0.78)",
+            }}
+          >
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.65rem" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+                <TrendingDown size={13} aria-hidden="true" color="#34d399" />
+                <strong style={{ color: "#ffffff", fontWeight: 600 }}>8+ Channels</strong>{" "}
+                Fee Math
+              </span>
+              <span aria-hidden="true" style={{ opacity: 0.35 }}>
+                |
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+                <Compass size={13} aria-hidden="true" color="#38bdf8" />
+                <strong style={{ color: "#ffffff", fontWeight: 600 }}>2-Opt VRPTW</strong>{" "}
+                Routing
+              </span>
+              <span aria-hidden="true" style={{ opacity: 0.35 }}>
+                |
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+                <Plane size={13} aria-hidden="true" color="#fbbf24" />
+                <strong style={{ color: "#ffffff", fontWeight: 600 }}>Multi-Gateway</strong>{" "}
+                Flights
+              </span>
+            </div>
+
+            <span
+              style={{
+                fontSize: "0.69rem",
+                letterSpacing: "0.09em",
+                textTransform: "uppercase",
+                color: "rgba(253, 230, 138, 0.9)",
+                fontWeight: 600,
+              }}
+            >
+              {activeScene.regionTag}
+            </span>
+          </div>
+        </div>
+      </section>
+
+      {/* Precision Trip Spec Builder Dock */}
       <section
         className="surface-card"
         style={{
-          padding: "1.5rem",
-          background:
-            "radial-gradient(circle at 88% 18%, rgba(16, 185, 129, 0.14), transparent 45%), var(--bg-surface)",
+          padding: "1.1rem 1.35rem",
+          borderRadius: "1.35rem",
+          minInlineSize: 0,
         }}
       >
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem", marginBlockEnd: "0.65rem" }}>
-          <span className="badge badge-emerald">
-            <Sparkles size={12} aria-hidden="true" /> NSGA-II 3D Pareto Solver
-          </span>
-          <span className="badge badge-route">
-            <Compass size={12} aria-hidden="true" /> OSRM N×N 2-Opt VRPTW
-          </span>
-          <span className="badge badge-gold">
-            <TrendingDown size={12} aria-hidden="true" /> Cross-Channel Fee Arbitrage
-          </span>
-        </div>
-
-        <h2 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 800, letterSpacing: "-0.02em" }}>
-          Where are you traveling next?
-        </h2>
-        <p
+        <div
           style={{
-            margin: "0.45rem 0 1.25rem",
-            fontSize: "0.9rem",
-            color: "var(--text-secondary)",
-            maxInlineSize: "68ch",
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            gap: "0.45rem",
+            marginBlockEnd: "0.8rem",
           }}
         >
-          Plan via the conversational AI copilot on the left or configure your route below. TripSage
-          deduplicates villas &amp; hotels across Airbnb, The Blue Kite, direct portals, and OTAs while
-          solving real road matrices, checkpost windows, and multi-gateway flights.
-        </p>
+          <div>
+            <span
+              style={{
+                display: "block",
+                fontSize: "0.68rem",
+                fontWeight: 700,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                color: "var(--accent-primary)",
+                marginBlockEnd: "0.12rem",
+              }}
+            >
+              01 / Configure Route &amp; Party
+            </span>
+            <h3 style={{ margin: 0, fontSize: "1.12rem", fontWeight: 700, letterSpacing: "-0.02em" }}>
+              Where are you traveling next?
+            </h3>
+          </div>
+          <span style={{ fontSize: "0.76rem", color: "var(--text-muted)" }}>
+            Or describe your trip in plain English in the copilot on the left
+          </span>
+        </div>
 
         {/* Accessible Quick-Start Form */}
         <form
@@ -248,19 +542,22 @@ export function WelcomeQuickStartView({
           onBlurCapture={handleFormBlurCapture}
           onInput={handleFormInput}
           onSubmit={handleSubmit}
-          style={{ display: "flex", flexDirection: "column", gap: "1.1rem" }}
+          style={{ display: "flex", flexDirection: "column", gap: "0.85rem", minInlineSize: 0 }}
         >
           {/* Origin & Destination Row */}
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
-              gap: "0.95rem",
+              gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
+              gap: "0.85rem",
             }}
           >
             <div>
               <label htmlFor={originId} className="qs-label">
-                Origin City or Neighborhood <span aria-hidden="true" style={{ color: "#ef4444" }}>*</span>
+                Origin City or Neighborhood{" "}
+                <span aria-hidden="true" style={{ color: "var(--danger-accent)" }}>
+                  *
+                </span>
               </label>
               <input
                 id={originId}
@@ -283,7 +580,10 @@ export function WelcomeQuickStartView({
 
             <div>
               <label htmlFor={destId} className="qs-label">
-                Destination City or Region <span aria-hidden="true" style={{ color: "#ef4444" }}>*</span>
+                Destination City or Region{" "}
+                <span aria-hidden="true" style={{ color: "var(--danger-accent)" }}>
+                  *
+                </span>
               </label>
               <input
                 id={destId}
@@ -304,7 +604,7 @@ export function WelcomeQuickStartView({
                     }
                   }
                 }}
-                placeholder="e.g., Coorg, North Goa, Bali, Sedona, Interlaken"
+                placeholder="e.g., Wayanad, North Goa, Bali, Sedona, Interlaken"
                 className="qs-input"
               />
               <div id={destErrId} className="qs-error-msg">
@@ -318,8 +618,8 @@ export function WelcomeQuickStartView({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-              gap: "0.85rem",
+              gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 145px), 1fr))",
+              gap: "0.75rem",
             }}
           >
             <div>
@@ -404,8 +704,8 @@ export function WelcomeQuickStartView({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-              gap: "0.95rem",
+              gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))",
+              gap: "0.8rem",
             }}
           >
             <fieldset className="qs-fieldset">
@@ -422,8 +722,8 @@ export function WelcomeQuickStartView({
                       setTransportMode("road");
                     }}
                   />
-                  <Car size={15} aria-hidden="true" color="var(--route-blue)" />
-                  <span>Pure Road Trip</span>
+                  <Car size={14} aria-hidden="true" color="var(--route-blue)" />
+                  <span>Road Trip</span>
                 </label>
                 <label className="qs-radio-option">
                   <input
@@ -436,7 +736,7 @@ export function WelcomeQuickStartView({
                       setTransportMode("flight");
                     }}
                   />
-                  <Plane size={15} aria-hidden="true" color="var(--gold-accent)" />
+                  <Plane size={14} aria-hidden="true" color="var(--gold-accent)" />
                   <span>Fly + Stay</span>
                 </label>
                 <label className="qs-radio-option">
@@ -450,8 +750,8 @@ export function WelcomeQuickStartView({
                       setTransportMode("hybrid");
                     }}
                   />
-                  <Compass size={15} aria-hidden="true" color="var(--accent-primary)" />
-                  <span>Hybrid Fly + Drive</span>
+                  <Compass size={14} aria-hidden="true" color="var(--accent-primary)" />
+                  <span>Fly + Drive</span>
                 </label>
               </div>
             </fieldset>
@@ -467,8 +767,8 @@ export function WelcomeQuickStartView({
                     checked={stayStrategy === "villas"}
                     onChange={() => setStayStrategy("villas")}
                   />
-                  <Hotel size={15} aria-hidden="true" color="var(--accent-primary)" />
-                  <span>Villas / Airbnb / Blue Kite</span>
+                  <Hotel size={14} aria-hidden="true" color="var(--accent-primary)" />
+                  <span>Villas &amp; Airbnb</span>
                 </label>
                 <label className="qs-radio-option">
                   <input
@@ -478,8 +778,8 @@ export function WelcomeQuickStartView({
                     checked={stayStrategy === "hotels"}
                     onChange={() => setStayStrategy("hotels")}
                   />
-                  <Hotel size={15} aria-hidden="true" color="var(--route-blue)" />
-                  <span>Hotels &amp; Resorts</span>
+                  <Hotel size={14} aria-hidden="true" color="var(--route-blue)" />
+                  <span>Hotels Only</span>
                 </label>
                 <label className="qs-radio-option">
                   <input
@@ -489,14 +789,14 @@ export function WelcomeQuickStartView({
                     checked={stayStrategy === "hybrid"}
                     onChange={() => setStayStrategy("hybrid")}
                   />
-                  <ShieldCheck size={15} aria-hidden="true" color="var(--gold-accent)" />
-                  <span>Hybrid (Hotel + Villa)</span>
+                  <ShieldCheck size={14} aria-hidden="true" color="var(--gold-accent)" />
+                  <span>Hybrid Stays</span>
                 </label>
               </div>
             </fieldset>
           </div>
 
-          {/* Villa Size & Nightly Ceiling + Submit Action */}
+          {/* Villa Size & Nightly Ceiling + Tactile Text-Roll Submit Action */}
           <div
             style={{
               display: "flex",
@@ -527,12 +827,15 @@ export function WelcomeQuickStartView({
                 </div>
               )}
 
-              <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", minInlineSize: "220px", flex: 1 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", minInlineSize: "min(100%, 210px)", flex: 1 }}>
                 <label
                   htmlFor={budgetId}
                   style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--text-secondary)", whiteSpace: "nowrap" }}
                 >
-                  Nightly Ceiling: <strong style={{ color: "var(--text-primary)" }}>{ceilingDisplay}</strong>
+                  Nightly Ceiling:{" "}
+                  <strong style={{ color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>
+                    {ceilingDisplay}
+                  </strong>
                 </label>
                 <input
                   id={budgetId}
@@ -551,13 +854,7 @@ export function WelcomeQuickStartView({
             <button
               type="submit"
               disabled={isPlanning}
-              className="btn btn-primary"
-              style={{
-                minBlockSize: "3.1rem",
-                paddingInline: "1.35rem",
-                fontSize: "0.92rem",
-                fontWeight: 800,
-              }}
+              className="ms-btn-roll"
             >
               {isPlanning ? (
                 <>
@@ -566,8 +863,15 @@ export function WelcomeQuickStartView({
                 </>
               ) : (
                 <>
-                  <span>Solve Arbitrage &amp; VRPTW Itinerary</span>
-                  <ArrowRight size={16} aria-hidden="true" />
+                  <span className="ms-btn-roll__window">
+                    <span className="ms-btn-roll__track">
+                      <span>Solve Arbitrage &amp; Itinerary</span>
+                      <span aria-hidden="true">Solve Arbitrage &amp; Itinerary</span>
+                    </span>
+                  </span>
+                  <span className="ms-btn-roll__chip" aria-hidden="true">
+                    <ArrowRight size={15} />
+                  </span>
                 </>
               )}
             </button>
@@ -575,102 +879,112 @@ export function WelcomeQuickStartView({
         </form>
       </section>
 
-      {/* Optional Sample Scenarios for First-Time Visitors */}
+      {/* Editorial Sample Scenarios */}
       <section
         className="surface-card"
         aria-label="Sample multi-modal scenarios"
-        style={{ padding: "1.15rem 1.35rem" }}
+        style={{ padding: "1.2rem 1.4rem", borderRadius: "1.35rem" }}
       >
         <div
           style={{
             display: "flex",
+            flexWrap: "wrap",
             alignItems: "center",
             justifyContent: "space-between",
-            marginBlockEnd: "0.75rem",
+            gap: "0.45rem",
+            marginBlockEnd: "0.85rem",
           }}
         >
-          <span style={{ fontSize: "0.82rem", fontWeight: 800, color: "var(--text-secondary)" }}>
-            Or explore a sample multi-modal optimization with one click:
-          </span>
+          <div>
+            <span
+              style={{
+                display: "block",
+                fontSize: "0.68rem",
+                fontWeight: 700,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                color: "var(--text-muted)",
+              }}
+            >
+              02 / Curated Blueprints
+            </span>
+            <span style={{ fontSize: "0.86rem", fontWeight: 700, color: "var(--text-primary)" }}>
+              Launch a live multi-modal corridor in one click
+            </span>
+          </div>
           <span style={{ fontSize: "0.74rem", color: "var(--text-muted)" }}>
-            Saves to your browser&apos;s Recent Trips once opened
+            Automatically saved to your browser&apos;s Recent Trips
           </span>
         </div>
 
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: "0.75rem",
+            gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
+            gap: "0.8rem",
           }}
         >
           <button
             type="button"
-            className="btn"
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "flex-start",
-              gap: "0.25rem",
-              padding: "0.8rem 0.95rem",
-              textAlign: "start",
-              blockSize: "auto",
-            }}
+            className="ms-sample-card"
             onClick={() => onTryExample("wayanad")}
           >
-            <span style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", fontWeight: 800, fontSize: "0.85rem" }}>
-              <Car size={14} aria-hidden="true" color="var(--route-blue)" />
-              Bengaluru -&gt; Wayanad
-            </span>
-            <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-              6-Day Road Trip · Mysuru Transit Hotel + 2 BHK Coffee Villa
-            </span>
+            <div style={{ display: "flex", justifyContent: "space-between", inlineSize: "100%", alignItems: "center" }}>
+              <span className="badge badge-route">
+                <Car size={12} aria-hidden="true" /> Road + Transit Split
+              </span>
+              <ArrowUpRight size={16} aria-hidden="true" className="ms-sample-card__arrow" />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: "0.94rem", letterSpacing: "-0.01em" }}>
+                Bengaluru → Wayanad
+              </div>
+              <div style={{ fontSize: "0.76rem", color: "var(--text-muted)", marginBlockStart: "0.18rem" }}>
+                6-Day SUV Corridor · Radisson Mysuru Transit + 2 BHK Estate Villa
+              </div>
+            </div>
           </button>
 
           <button
             type="button"
-            className="btn"
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "flex-start",
-              gap: "0.25rem",
-              padding: "0.8rem 0.95rem",
-              textAlign: "start",
-              blockSize: "auto",
-            }}
+            className="ms-sample-card"
             onClick={() => onTryExample("goa")}
           >
-            <span style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", fontWeight: 800, fontSize: "0.85rem" }}>
-              <Plane size={14} aria-hidden="true" color="var(--gold-accent)" />
-              Bengaluru -&gt; North Goa
-            </span>
-            <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-              Hybrid Fly + Drive · GOX vs GOI Gateway + The Blue Kite Villa
-            </span>
+            <div style={{ display: "flex", justifyContent: "space-between", inlineSize: "100%", alignItems: "center" }}>
+              <span className="badge badge-gold">
+                <Plane size={12} aria-hidden="true" /> Hybrid Fly + Drive
+              </span>
+              <ArrowUpRight size={16} aria-hidden="true" className="ms-sample-card__arrow" />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: "0.94rem", letterSpacing: "-0.01em" }}>
+                Bengaluru → North Goa
+              </div>
+              <div style={{ fontSize: "0.76rem", color: "var(--text-muted)", marginBlockStart: "0.18rem" }}>
+                GOX vs. GOI Gateway Arbitrage + The Blue Kite 3 BHK Pool Villa
+              </div>
+            </div>
           </button>
 
           <button
             type="button"
-            className="btn"
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "flex-start",
-              gap: "0.25rem",
-              padding: "0.8rem 0.95rem",
-              textAlign: "start",
-              blockSize: "auto",
-            }}
+            className="ms-sample-card"
             onClick={() => onTryExample("mahabaleshwar")}
           >
-            <span style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", fontWeight: 800, fontSize: "0.85rem" }}>
-              <Compass size={14} aria-hidden="true" color="var(--accent-primary)" />
-              Mumbai -&gt; Mahabaleshwar
-            </span>
-            <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-              Live Solver · 3 BHK Hill Villa + Western Ghats Viewpoints
-            </span>
+            <div style={{ display: "flex", justifyContent: "space-between", inlineSize: "100%", alignItems: "center" }}>
+              <span className="badge badge-emerald">
+                <Compass size={12} aria-hidden="true" /> Western Ghats Ridge
+              </span>
+              <ArrowUpRight size={16} aria-hidden="true" className="ms-sample-card__arrow" />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: "0.94rem", letterSpacing: "-0.01em" }}>
+                Mumbai → Mahabaleshwar
+              </div>
+              <div style={{ fontSize: "0.76rem", color: "var(--text-muted)", marginBlockStart: "0.18rem" }}>
+                3 BHK Highland Villa + Morning Ghat Viewpoints &amp; Strawberry Trails
+              </div>
+            </div>
           </button>
         </div>
       </section>
