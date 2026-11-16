@@ -1,6 +1,46 @@
 export type TransportMode = "road" | "flight" | "hybrid";
 export type StayStrategy = "hotels" | "villas" | "hybrid";
 export type DietaryPreference = "veg" | "non_veg" | "both";
+export type CurrencyCode = "INR" | "USD" | "EUR" | "GBP";
+export type PriceProvenance = "live_verified" | "live_scraped" | "estimated_benchmark";
+
+export const DEFAULT_FX_RATES: Record<CurrencyCode, number> = {
+  INR: 1.0,
+  USD: 0.0118,
+  EUR: 0.0109,
+  GBP: 0.0093,
+};
+
+const CURRENCY_LOCALES: Record<CurrencyCode, string> = {
+  INR: "en-IN",
+  USD: "en-US",
+  EUR: "en-IE",
+  GBP: "en-GB",
+};
+
+export function formatMoney(
+  amountInr: number,
+  currency: CurrencyCode = "INR",
+  fxRates?: Record<string, number>
+): string {
+  const rate = fxRates?.[currency] ?? DEFAULT_FX_RATES[currency] ?? 1.0;
+  const converted = currency === "INR" ? Math.round(amountInr) : Math.round(amountInr * rate);
+  try {
+    return new Intl.NumberFormat(CURRENCY_LOCALES[currency] ?? "en-IN", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format(converted);
+  } catch {
+    const sym = currency === "USD" ? "$" : currency === "EUR" ? "€" : currency === "GBP" ? "£" : "₹";
+    return `${sym}${converted.toLocaleString("en-US")}`;
+  }
+}
+
+export interface LivePhaseStatus {
+  phase: string;
+  detail: string;
+}
 
 export interface TravelParty {
   adults: number;
@@ -40,6 +80,7 @@ export interface TripSpec {
   destination_villa_bhk: number;
   nightly_budget_min_inr: number;
   nightly_budget_max_inr: number;
+  currency?: CurrencyCode | null;
   party: TravelParty;
   pinned_stays: PinnedStaySpec[];
   activities: ActivityPreferences;
@@ -87,6 +128,8 @@ export interface StayCandidate {
   savings_inr: number;
   deal_anomaly_score: number;
   anomaly_badge: string;
+  price_provenance?: PriceProvenance;
+  provenance_label?: string;
 }
 
 export interface FlightOption {
@@ -103,6 +146,9 @@ export interface FlightOption {
   ota_unoptimized_inr: number;
   savings_inr: number;
   booking_channel: string;
+  booking_url?: string;
+  price_provenance?: PriceProvenance;
+  provenance_label?: string;
 }
 
 export interface RoadSegment {
@@ -146,6 +192,7 @@ export interface TimelineStop {
   dietary_note?: string | null;
   kid_note?: string | null;
   insider_tip?: string | null;
+  drive_from_prev_mins?: number | null;
 }
 
 export interface ItineraryDay {
@@ -173,6 +220,8 @@ export interface ParetoBlueprint {
   name: string;
   strategy_subtitle: string;
   recommended: boolean;
+  pareto_front_rank?: number;
+  crowding_distance?: number;
   total_core_landed_inr: number;
   unoptimized_baseline_inr: number;
   total_arbitrage_savings_inr: number;
@@ -200,6 +249,10 @@ export interface ToolCallTrace {
 }
 
 export interface OptimizationResponse {
+  trip_id?: string | null;
+  active_currency?: CurrencyCode;
+  fx_rates?: Record<string, number>;
+  pareto_frontier_note?: string;
   trip_spec: TripSpec;
   platform_coverage: PlatformCoverageNote[];
   tool_trace: ToolCallTrace[];

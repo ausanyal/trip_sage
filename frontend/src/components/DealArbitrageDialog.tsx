@@ -1,15 +1,22 @@
 "use client";
 
 import React, { useEffect, useId, useRef } from "react";
-import { CheckCircle2, ExternalLink, ShieldCheck, Sparkles, X } from "lucide-react";
-import type { StayCandidate } from "@/types/trip";
+import { CheckCircle2, ExternalLink, Info, ShieldCheck, Sparkles, X } from "lucide-react";
+import { formatMoney, type CurrencyCode, type StayCandidate } from "@/types/trip";
 
 interface DealArbitrageDialogProps {
   stay: StayCandidate | null;
+  currency?: CurrencyCode;
+  fxRates?: Record<string, number>;
   onClose: () => void;
 }
 
-export function DealArbitrageDialog({ stay, onClose }: DealArbitrageDialogProps) {
+export function DealArbitrageDialog({
+  stay,
+  currency = "INR",
+  fxRates,
+  onClose,
+}: DealArbitrageDialogProps) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const titleId = useId();
 
@@ -63,6 +70,15 @@ export function DealArbitrageDialog({ stay, onClose }: DealArbitrageDialogProps)
     };
   }, [onClose]);
 
+  const prov = stay?.price_provenance ?? "estimated_benchmark";
+  const provLabel =
+    stay?.provenance_label ??
+    (prov === "live_verified"
+      ? "Live Verified OTA Quote"
+      : prov === "live_scraped"
+      ? "Live Scraped Direct Tariff"
+      : "Parametric Market Benchmark");
+
   return (
     <dialog
       ref={dialogRef}
@@ -74,9 +90,25 @@ export function DealArbitrageDialog({ stay, onClose }: DealArbitrageDialogProps)
         <div style={{ padding: "1.35rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem" }}>
             <div style={{ flex: 1 }}>
-              <span className="badge badge-emerald" style={{ marginBlockEnd: "0.35rem" }}>
-                <Sparkles size={12} aria-hidden="true" /> {stay.anomaly_badge}
-              </span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginBlockEnd: "0.35rem" }}>
+                <span className="badge badge-emerald">
+                  <Sparkles size={12} aria-hidden="true" />{" "}
+                  {stay.savings_inr > 0
+                    ? `Saves ${formatMoney(stay.savings_inr, currency, fxRates)} via ${stay.best_channel}`
+                    : stay.anomaly_badge}
+                </span>
+                <span
+                  className={`badge ${
+                    prov === "live_verified"
+                      ? "badge-emerald"
+                      : prov === "live_scraped"
+                      ? "badge-route"
+                      : "badge-gold"
+                  }`}
+                >
+                  <Info size={12} aria-hidden="true" /> {provLabel}
+                </span>
+              </div>
               <h2
                 id={titleId}
                 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 800, lineHeight: 1.25 }}
@@ -115,13 +147,13 @@ export function DealArbitrageDialog({ stay, onClose }: DealArbitrageDialogProps)
           >
             <div>
               <strong style={{ display: "block", color: "var(--accent-primary)" }}>
-                SUV &amp; Corridor Fit
+                Vehicle &amp; Corridor Fit
               </strong>
               <span>{stay.suv_access_note}</span>
             </div>
             <div>
               <strong style={{ display: "block", color: "var(--route-blue)" }}>
-                Family Fit (Ages 8 &amp; 10)
+                Party &amp; Room Configuration
               </strong>
               <span>{stay.kid_fit_note}</span>
             </div>
@@ -130,15 +162,15 @@ export function DealArbitrageDialog({ stay, onClose }: DealArbitrageDialogProps)
           <div className="table-scroll">
             <table className="rate-table">
               <caption>
-                True Landed Checkout Comparison ({stay.nights}{" "}
+                True Landed Checkout Comparison in {currency} ({stay.nights}{" "}
                 {stay.nights === 1 ? "Night" : "Nights"} · All Taxes &amp; Fees Included)
               </caption>
               <thead>
                 <tr>
                   <th scope="col">Channel</th>
-                  <th scope="col">Base + Extra Bed</th>
+                  <th scope="col">Base + Add-ons</th>
                   <th scope="col">Platform / Clean Fee</th>
-                  <th scope="col">18% GST</th>
+                  <th scope="col">Taxes / GST</th>
                   <th scope="col">Promo</th>
                   <th scope="col">True Landed</th>
                   <th scope="col">Action</th>
@@ -161,25 +193,29 @@ export function DealArbitrageDialog({ stay, onClose }: DealArbitrageDialogProps)
                       )}
                     </td>
                     <td>
-                      ₹{(offer.base_total_inr + offer.extra_bed_or_addons_inr).toLocaleString("en-IN")}
+                      {formatMoney(
+                        offer.base_total_inr + offer.extra_bed_or_addons_inr,
+                        currency,
+                        fxRates
+                      )}
                     </td>
                     <td>
                       {offer.platform_or_cleaning_fee_inr > 0
-                        ? `+₹${offer.platform_or_cleaning_fee_inr.toLocaleString("en-IN")}`
-                        : "₹0"}
+                        ? `+${formatMoney(offer.platform_or_cleaning_fee_inr, currency, fxRates)}`
+                        : formatMoney(0, currency, fxRates)}
                     </td>
-                    <td>+₹{offer.taxes_gst_inr.toLocaleString("en-IN")}</td>
+                    <td>+{formatMoney(offer.taxes_gst_inr, currency, fxRates)}</td>
                     <td style={{ color: "var(--accent-primary)", fontWeight: 700 }}>
                       {offer.promo_discount_inr > 0
-                        ? `−₹${offer.promo_discount_inr.toLocaleString("en-IN")}`
+                        ? `−${formatMoney(offer.promo_discount_inr, currency, fxRates)}`
                         : "—"}
                     </td>
                     <td>
                       <strong style={{ fontSize: "0.95rem" }}>
-                        ₹{offer.landed_total_inr.toLocaleString("en-IN")}
+                        {formatMoney(offer.landed_total_inr, currency, fxRates)}
                       </strong>
                       <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
-                        ₹{offer.per_night_landed_inr.toLocaleString("en-IN")}/night
+                        {formatMoney(offer.per_night_landed_inr, currency, fxRates)}/night
                       </div>
                     </td>
                     <td>

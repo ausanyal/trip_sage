@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-import math
 import time
-from typing import Dict, List, Tuple
+from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
+from currency import get_live_fx_rates, infer_currency_from_countries
+from db import save_trip_snapshot
 from models import (
     ItineraryDay,
     OptimizationResponse,
@@ -29,6 +30,16 @@ from providers.geo_routing import (
     route_leg,
 )
 from providers.stays_arbitrage import discover_destination_stays, resolve_pinned_stays
+from solver.vrptw import (
+    cluster_pois_kmedoids,
+    fetch_osrm_table_matrix,
+    format_clock_min,
+    parse_departure_pref_minutes,
+    solve_daily_vrptw_2opt,
+    strict_pareto_rank_and_filter,
+)
+
+PhaseEmitter = Callable[[str, str], Awaitable[None]]
 
 
 def _parse_trip_dates(start_str: str, end_str: str) -> Tuple[dt.date, dt.date, int]:
@@ -50,7 +61,6 @@ def _partition_stay_windows(
     pinned: List[PinnedStaySpec],
     stay_strategy: str,
 ) -> Tuple[List[PinnedStaySpec], str, str, List[PinnedStaySpec]]:
-    """Splits calendar nights into (outbound_pins, dest_check_in, dest_check_out, return_pins)."""
     if not pinned or stay_strategy == "villas":
         return [], d_start.isoformat(), d_end.isoformat(), []
 
@@ -72,51 +82,15 @@ def _partition_stay_windows(
     dest_in = outbound[-1].check_out if outbound else d_start.isoformat()
     dest_out = returning[0].check_in if returning else d_end.isoformat()
 
-    # Guard against invalid date inversion if user edited dates without updating pinned_stays
     try:
         di = dt.date.fromisoformat(dest_in)
         do = dt.date.fromisoformat(dest_out)
         if do <= di:
-            dest_in = d_start.isoformat()
-            dest_out = d_end.isoformat()
-            return [], dest_in, dest_out, []
+            return [], d_start.isoformat(), d_end.isoformat(), []
     except Exception:
         return [], d_start.isoformat(), d_end.isoformat(), []
 
     return outbound, dest_in, dest_out, returning
-
-
-def _build_local_loop_segment(
-    day_num: int,
-    dest_geo: GeoLocation,
-    pois: List[DiscoveredPOI],
-    vehicle_name: str,
-    explore_days: int,
-) -> RoadSegment:
-    clearance_mm, km_per_l, fuel_price = parse_vehicle_profile(vehicle_name)
-    sample_pois = [p for p in pois if p.category != "dining"][:5]
-    coords: List[List[float]] = [[round(dest_geo.lng, 4), round(dest_geo.lat, 4)]]
-    for p in sample_pois:
-        coords.append([round(p.lng, 4), round(p.lat, 4)])
-    coords.append([round(dest_geo.lng, 4), round(dest_geo.lat, 4)])
-
-    loop_km = round(max(36.0, 52.0 * max(1, explore_days)), 1)
-    dur_mins = int(round((loop_km / 34.0) * 60))
-    fuel_inr = int(round((loop_km / max(1.0, km_per_l)) * fuel_price))
-
-    return RoadSegment(
-        id="seg-local-exploration-loop",
-        day_number=day_num,
-        from_name=f"{dest_geo.short_name} Stay Base",
-        to_name=f"{dest_geo.short_name} Micro-Corridor Attractions",
-        highway_label=f"{dest_geo.short_name} Local Scenic & Sightseeing Loop",
-        distance_km=loop_km,
-        duration_mins=dur_mins,
-        fastag_toll_inr=0,
-        fuel_estimate_inr=fuel_inr,
-        gate_alert=f"Clustered by compass sector to cut backtracking ({clearance_mm}mm clearance verified).",
-        coordinates=coords,
-    )
 
 
 def _format_duration(mins: int) -> str:
@@ -124,7 +98,7 @@ def _format_duration(mins: int) -> str:
     return f"{h}h {m:02d}m" if h > 0 else f"{m}m"
 
 
-def _build_dynamic_itinerary(
+async def _build_vrptw_itinerary_for_stay(
     spec: TripSpec,
     d_start: dt.date,
     d_end: dt.date,
@@ -133,39 +107,66 @@ def _build_dynamic_itinerary(
     outbound_stays: List[StayCandidate],
     dest_stay: StayCandidate,
     return_stays: List[StayCandidate],
-    segments: List[RoadSegment],
+    highway_segments: List[RoadSegment],
     pois: List[DiscoveredPOI],
     has_flights: bool,
-) -> List[ItineraryDay]:
+) -> Tuple[List[ItineraryDay], List[RoadSegment], str]:
+    """Builds a full multi-day itinerary where destination exploration days are solved via
+    OSRM N×N travel-time matrices + K-medoids clustering + 2-Opt VRPTW local search.
+    """
     total_days = max(2, (d_end - d_start).days + 1)
-    days: List[ItineraryDay] = []
-
-    # Sort non-dining POIs by compass angle around destination stay for zero-backtrack daily sector clustering
-    excursions = [p for p in pois if p.category != "dining"]
-    excursions.sort(key=lambda p: math.atan2(p.lat - dest_stay.lat, p.lng - dest_stay.lng))
-    restaurants = [p for p in pois if p.category == "dining"]
-
-    exc_idx = 0
-    din_idx = 0
-
-    def next_excursion() -> DiscoveredPOI:
-        nonlocal exc_idx
-        p = excursions[exc_idx % len(excursions)]
-        exc_idx += 1
-        return p
-
-    def next_restaurant() -> DiscoveredPOI:
-        nonlocal din_idx
-        r = restaurants[din_idx % len(restaurants)]
-        din_idx += 1
-        return r
-
-    seg_by_day: Dict[int, List[RoadSegment]] = {}
-    for seg in segments:
-        seg_by_day.setdefault(seg.day_number, []).append(seg)
-
     outbound_nights = sum(s.nights for s in outbound_stays)
     return_nights = sum(s.nights for s in return_stays)
+
+    # Identify which day_idx values are full destination exploration days
+    explore_day_indices = [
+        idx
+        for idx in range(total_days)
+        if idx > outbound_nights and idx < (total_days - 1 - return_nights)
+    ]
+
+    excursions = [p for p in pois if p.category != "dining"][:14]
+    restaurants = [p for p in pois if p.category == "dining"][:8]
+
+    # Build N×N OSRM table anchored at this specific candidate stay's GPS coordinates (depot = index 0)
+    matrix_nodes: List[Tuple[float, float]] = [(dest_stay.lat, dest_stay.lng)]
+    node_index_map: Dict[str, int] = {}
+    for p in excursions + restaurants:
+        if p.id not in node_index_map and len(matrix_nodes) < 24:
+            node_index_map[p.id] = len(matrix_nodes)
+            matrix_nodes.append((p.lat, p.lng))
+
+    dur_matrix, dist_matrix, matrix_source = await fetch_osrm_table_matrix(matrix_nodes)
+
+    def _pair_dist(a: DiscoveredPOI, b: DiscoveredPOI) -> float:
+        ia = node_index_map.get(a.id, 0)
+        ib = node_index_map.get(b.id, 0)
+        return dist_matrix[ia][ib]
+
+    daily_clusters = cluster_pois_kmedoids(
+        excursions=excursions,
+        k_days=max(1, len(explore_day_indices)),
+        dist_lookup=_pair_dist,
+    )
+
+    clearance_mm, km_per_l, fuel_price = parse_vehicle_profile(spec.vehicle_name)
+    seg_by_day: Dict[int, List[RoadSegment]] = {}
+    for seg in highway_segments:
+        seg_by_day.setdefault(seg.day_number, []).append(seg)
+
+    local_loop_segments: List[RoadSegment] = []
+    used_rest_ids: set[str] = set()
+    cluster_cursor = 0
+    days: List[ItineraryDay] = []
+
+    dep_min_day1 = parse_departure_pref_minutes(spec.departure_time_pref, default_min=9 * 60)
+    ret_min_pref = parse_departure_pref_minutes(spec.return_timing_pref, default_min=13 * 60 + 30)
+
+    def _pick_transit_rest() -> DiscoveredPOI:
+        avail = [r for r in restaurants if r.id not in used_rest_ids] or restaurants
+        pick = avail[0]
+        used_rest_ids.add(pick.id)
+        return pick
 
     for day_idx in range(total_days):
         day_num = day_idx + 1
@@ -175,18 +176,20 @@ def _build_dynamic_itinerary(
         day_segs = seg_by_day.get(day_num, [])
         day_km = round(sum(s.distance_km for s in day_segs), 1)
         day_mins = sum(s.duration_mins for s in day_segs)
-
         stops: List[TimelineStop] = []
 
-        # CASE 1: Outbound transit anchor day (e.g., Day 1 stopping at transit hotel)
+        # CASE 1: Outbound transit anchor day
         if day_idx < outbound_nights and outbound_stays:
             t_stay = outbound_stays[min(day_idx, len(outbound_stays) - 1)]
             leg = day_segs[0] if day_segs else None
-            drive_lbl = _format_duration(leg.duration_mins) if leg else "3h 00m"
+            leg_mins = leg.duration_mins if leg else 180
+            drive_lbl = _format_duration(leg_mins)
+            arr_min = min(20 * 60 + 30, dep_min_day1 + leg_mins)
+
             stops.append(
                 TimelineStop(
                     id=f"d{day_num}-s1",
-                    time_window=spec.departure_time_pref,
+                    time_window=f"{format_clock_min(dep_min_day1)} – {format_clock_min(arr_min)}",
                     title=f"Outbound Leg: {origin_geo.short_name} -> {t_stay.city}",
                     location_label=leg.highway_label if leg else f"{origin_geo.short_name} -> {t_stay.city}",
                     category="drive",
@@ -199,12 +202,13 @@ def _build_dynamic_itinerary(
                         if leg
                         else None
                     ),
+                    drive_from_prev_mins=leg_mins,
                 )
             )
             stops.append(
                 TimelineStop(
                     id=f"d{day_num}-s2",
-                    time_window="Late Afternoon",
+                    time_window=format_clock_min(arr_min + 15),
                     title=f"Check-in at {t_stay.name}",
                     location_label=f"{t_stay.city} · {t_stay.micro_region}",
                     category="stay",
@@ -222,7 +226,7 @@ def _build_dynamic_itinerary(
             stops.append(
                 TimelineStop(
                     id=f"d{day_num}-s3",
-                    time_window="7:45 PM",
+                    time_window="7:45 PM – 9:00 PM",
                     title=f"Relaxed Dinner at {t_stay.name}",
                     location_label=t_stay.city,
                     category="dining",
@@ -251,15 +255,22 @@ def _build_dynamic_itinerary(
         elif day_idx == outbound_nights:
             prev_name = outbound_stays[-1].city if outbound_stays else origin_geo.short_name
             leg = day_segs[0] if day_segs else None
-            drive_lbl = _format_duration(leg.duration_mins) if leg else "2h 45m"
+            leg_mins = leg.duration_mins if leg else 165
+            drive_lbl = _format_duration(leg_mins)
+            start_m = 9 * 60 if outbound_stays else dep_min_day1
+            # Enforce daytime checkpost passage before 19:30
+            if start_m + leg_mins > 19 * 60 + 30:
+                start_m = max(6 * 60 + 30, 19 * 60 + 30 - leg_mins)
+            arr_m = start_m + leg_mins
+
             stops.append(
                 TimelineStop(
                     id=f"d{day_num}-s1",
-                    time_window="Morning" if outbound_stays else spec.departure_time_pref,
+                    time_window=f"{format_clock_min(start_m)} – {format_clock_min(arr_m)}",
                     title=(
                         f"Gateway Flight + Scenic Transfer into {dest_geo.short_name}"
                         if has_flights and not outbound_stays
-                        else f"Scenic Corridor Drive: {prev_name} -> {dest_geo.short_name}"
+                        else f"Daylight Corridor Drive: {prev_name} -> {dest_geo.short_name}"
                     ),
                     location_label=leg.highway_label if leg else f"{prev_name} -> {dest_geo.short_name}",
                     category="flight" if (has_flights and not outbound_stays) else "drive",
@@ -267,52 +278,62 @@ def _build_dynamic_itinerary(
                     lng=round(((outbound_stays[-1].lng if outbound_stays else origin_geo.lng) + dest_stay.lng) / 2, 4),
                     duration_label=drive_lbl,
                     description=f"Daylight arrival approach into {dest_geo.short_name} via verified highway corridor.",
-                    insider_tip=leg.gate_alert if leg and leg.gate_alert else "Daytime arrival ensures stress-free estate/hotel check-in.",
+                    insider_tip=leg.gate_alert if leg and leg.gate_alert else "Daytime arrival ensures stress-free check-in.",
+                    drive_from_prev_mins=leg_mins,
                 )
             )
-            lunch_spot = next_restaurant()
+            lunch_spot = _pick_transit_rest()
+            lunch_start = max(12 * 60 + 30, arr_m + 15)
             stops.append(
                 TimelineStop(
                     id=f"d{day_num}-s2",
-                    time_window="12:45 PM – 1:45 PM",
+                    time_window=f"{format_clock_min(lunch_start)} – {format_clock_min(lunch_start + 65)}",
                     title=f"Arrival Lunch at {lunch_spot.name}",
                     location_label=dest_geo.short_name,
                     category="dining",
                     lat=lunch_spot.lat,
                     lng=lunch_spot.lng,
-                    duration_label="1h 00m",
+                    duration_label="1h 05m",
                     description=lunch_spot.description,
                     dietary_note=lunch_spot.dietary_note,
                 )
             )
+            checkin_m = max(14 * 60, lunch_start + 85)
             stops.append(
                 TimelineStop(
                     id=f"d{day_num}-s3",
-                    time_window="2:15 PM",
+                    time_window=format_clock_min(checkin_m),
                     title=f"Check-in at {dest_stay.name}",
                     location_label=f"{dest_geo.short_name} · {dest_stay.micro_region}",
                     category="stay",
                     lat=dest_stay.lat,
                     lng=dest_stay.lng,
                     duration_label=f"{dest_stay.nights}N Primary Base",
-                    description=f"Settle into {dest_stay.name} ({dest_stay.bedrooms_label}), positioned centrally for minimal daily driving.",
+                    description=f"Settle into {dest_stay.name} ({dest_stay.bedrooms_label}), positioned centrally to minimize daily excursion detours.",
                     kid_note=dest_stay.kid_fit_note,
                 )
             )
-            eve_poi = next_excursion()
-            stops.append(
-                TimelineStop(
-                    id=f"d{day_num}-s4",
-                    time_window="4:45 PM – 6:15 PM",
-                    title=f"Golden-Hour Walk: {eve_poi.name}",
-                    location_label=dest_geo.short_name,
-                    category="nature",
-                    lat=eve_poi.lat,
-                    lng=eve_poi.lng,
-                    duration_label="1h 30m",
-                    description=eve_poi.description,
+            if excursions:
+                nearest_eve = min(
+                    excursions,
+                    key=lambda p: dur_matrix[0][node_index_map.get(p.id, 0)],
                 )
-            )
+                eve_drv = int(round(dur_matrix[0][node_index_map.get(nearest_eve.id, 0)]))
+                stops.append(
+                    TimelineStop(
+                        id=f"d{day_num}-s4",
+                        time_window="4:45 PM – 6:10 PM",
+                        title=f"Golden-Hour Walk: {nearest_eve.name}",
+                        location_label=dest_geo.short_name,
+                        category="nature",
+                        lat=nearest_eve.lat,
+                        lng=nearest_eve.lng,
+                        duration_label="1h 25m",
+                        description=nearest_eve.description,
+                        insider_tip=f"Closest sunset spot to {dest_stay.name} ({eve_drv}m drive).",
+                        drive_from_prev_mins=eve_drv,
+                    )
+                )
             days.append(
                 ItineraryDay(
                     day_number=day_num,
@@ -331,12 +352,13 @@ def _build_dynamic_itinerary(
         elif day_idx == total_days - 1:
             start_from = return_stays[-1].city if return_stays else dest_geo.short_name
             leg = day_segs[0] if day_segs else None
-            drive_lbl = _format_duration(leg.duration_mins) if leg else "3h 15m"
-            lunch_spot = next_restaurant()
+            leg_mins = leg.duration_mins if leg else 195
+            drive_lbl = _format_duration(leg_mins)
+            lunch_spot = _pick_transit_rest()
             stops.append(
                 TimelineStop(
                     id=f"d{day_num}-s1",
-                    time_window="9:30 AM – 12:30 PM",
+                    time_window="9:30 AM – 1:00 PM",
                     title=f"Unhurried Morning & Pre-Departure Lunch in {start_from}",
                     location_label=start_from,
                     category="dining",
@@ -350,7 +372,7 @@ def _build_dynamic_itinerary(
             stops.append(
                 TimelineStop(
                     id=f"d{day_num}-s2",
-                    time_window="Afternoon",
+                    time_window=f"{format_clock_min(ret_min_pref)} – {format_clock_min(ret_min_pref + leg_mins)}",
                     title=(
                         f"Return Flight + Homeward Transfer to {origin_geo.short_name}"
                         if has_flights and not return_stays
@@ -362,6 +384,7 @@ def _build_dynamic_itinerary(
                     lng=origin_geo.lng,
                     duration_label=drive_lbl,
                     description=f"Smooth return leg back to {spec.origin}, wrapping up your {total_days}-day trip.",
+                    drive_from_prev_mins=leg_mins,
                 )
             )
             days.append(
@@ -378,45 +401,49 @@ def _build_dynamic_itinerary(
                 )
             )
 
-        # CASE 4: Return transit stopover day (breaking up return drive at a pinned anchor)
+        # CASE 4: Return transit stopover day
         elif day_idx >= total_days - 1 - return_nights and return_stays:
             r_idx = day_idx - (total_days - 1 - return_nights)
             r_stay = return_stays[min(r_idx, len(return_stays) - 1)]
             leg = day_segs[0] if day_segs else None
-            drive_lbl = _format_duration(leg.duration_mins) if leg else "3h 15m"
-            lunch_spot = next_restaurant()
+            leg_mins = leg.duration_mins if leg else 190
+            drive_lbl = _format_duration(leg_mins)
+            rollout_m = min(ret_min_pref, 20 * 60 - leg_mins)  # Guarantee checkpost clearance before 20:00
+            lunch_spot = _pick_transit_rest()
+
             stops.append(
                 TimelineStop(
                     id=f"d{day_num}-s1",
-                    time_window="Morning – 12:30 PM",
-                    title=f"Relaxed Morning Checkout & Lunch at {lunch_spot.name}",
+                    time_window="9:30 AM – 12:45 PM",
+                    title=f"Relaxed Checkout & Farewell Lunch at {lunch_spot.name}",
                     location_label=dest_geo.short_name,
                     category="dining",
                     lat=lunch_spot.lat,
                     lng=lunch_spot.lng,
                     duration_label="Morning",
-                    description=f"Enjoy a slow final morning at {dest_stay.name} and lunch before rolling out ({spec.return_timing_pref}).",
+                    description=f"Slow final morning at {dest_stay.name} and lunch before rolling out.",
                     dietary_note=lunch_spot.dietary_note,
                 )
             )
             stops.append(
                 TimelineStop(
                     id=f"d{day_num}-s2",
-                    time_window="Early Afternoon",
+                    time_window=f"{format_clock_min(rollout_m)} – {format_clock_min(rollout_m + leg_mins)}",
                     title=f"Daylight Return Corridor: {dest_geo.short_name} -> {r_stay.city}",
                     location_label=leg.highway_label if leg else f"{dest_geo.short_name} -> {r_stay.city}",
                     category="drive",
                     lat=round((dest_stay.lat + r_stay.lat) / 2, 4),
                     lng=round((dest_stay.lng + r_stay.lng) / 2, 4),
                     duration_label=drive_lbl,
-                    description=f"Daylight drive to {r_stay.name} with ample buffer before any evening checkpost closures.",
+                    description=f"Daylight drive to {r_stay.name} clearing forest/ghat checkposts well before 21:00 closure.",
                     insider_tip=leg.gate_alert if leg and leg.gate_alert else None,
+                    drive_from_prev_mins=leg_mins,
                 )
             )
             stops.append(
                 TimelineStop(
                     id=f"d{day_num}-s3",
-                    time_window="Late Afternoon",
+                    time_window=format_clock_min(rollout_m + leg_mins + 15),
                     title=f"Check-in & Evening Rest at {r_stay.name}",
                     location_label=f"{r_stay.city} · {r_stay.micro_region}",
                     category="stay",
@@ -440,76 +467,65 @@ def _build_dynamic_itinerary(
                 )
             )
 
-        # CASE 5: Full destination exploration day (spatially clustered around stay)
+        # CASE 5: Full Destination Exploration Day — Solved via K-Medoids + 2-Opt VRPTW!
         else:
-            morn = next_excursion()
-            lunch = next_restaurant()
-            aft = next_excursion()
-            local_km = day_km if day_km > 0 else 46.0
-            local_lbl = _format_duration(day_mins) if day_mins > 0 else "1h 25m"
-
-            stops.append(
-                TimelineStop(
-                    id=f"d{day_num}-s1",
-                    time_window="9:00 AM – 11:30 AM",
-                    title=morn.name,
-                    location_label=f"{dest_geo.short_name} ({morn.cuisine_or_tag})",
-                    category=morn.category,  # type: ignore[arg-type]
-                    lat=morn.lat,
-                    lng=morn.lng,
-                    duration_label="2h 30m",
-                    description=morn.description,
-                    kid_note=morn.kid_note,
-                    insider_tip=morn.insider_tip,
+            cluster = daily_clusters[cluster_cursor % len(daily_clusters)]
+            cluster_cursor += 1
+            vrp_stops, loop_km, loop_mins, loop_coords = solve_daily_vrptw_2opt(
+                day_num=day_num,
+                city_short=dest_geo.short_name,
+                depot_lat=dest_stay.lat,
+                depot_lng=dest_stay.lng,
+                day_excursions=cluster,
+                restaurants=restaurants,
+                pace=spec.activities.pace,
+                node_index_map=node_index_map,
+                dur_matrix=dur_matrix,
+                dist_matrix=dist_matrix,
+                used_restaurant_ids=used_rest_ids,
+            )
+            loop_fuel = int(round((loop_km / max(1.0, km_per_l)) * fuel_price))
+            local_loop_segments.append(
+                RoadSegment(
+                    id=f"seg-vrptw-day-{day_num}",
+                    day_number=day_num,
+                    from_name=dest_stay.name.split("—")[0].strip(),
+                    to_name=f"{dest_geo.short_name} Day {day_num} VRPTW Loop",
+                    highway_label=f"2-Opt VRPTW Sector Tour ({len(vrp_stops)} Time-Windowed Stops)",
+                    distance_km=loop_km,
+                    duration_mins=loop_mins,
+                    fastag_toll_inr=0,
+                    fuel_estimate_inr=loop_fuel,
+                    gate_alert=f"2-Opt VRPTW verified ({matrix_source}) · {clearance_mm}mm clearance ready.",
+                    coordinates=loop_coords,
                 )
             )
-            stops.append(
-                TimelineStop(
-                    id=f"d{day_num}-s2",
-                    time_window="12:45 PM – 2:00 PM",
-                    title=f"Regional Lunch at {lunch.name}",
-                    location_label=dest_geo.short_name,
-                    category="dining",
-                    lat=lunch.lat,
-                    lng=lunch.lng,
-                    duration_label="1h 15m",
-                    description=lunch.description,
-                    dietary_note=lunch.dietary_note,
-                )
-            )
-            stops.append(
-                TimelineStop(
-                    id=f"d{day_num}-s3",
-                    time_window="2:45 PM – 4:45 PM",
-                    title=aft.name,
-                    location_label=f"{dest_geo.short_name} ({aft.cuisine_or_tag})",
-                    category=aft.category,  # type: ignore[arg-type]
-                    lat=aft.lat,
-                    lng=aft.lng,
-                    duration_label="2h 00m",
-                    description=aft.description,
-                    kid_note=aft.kid_note,
-                )
-            )
+            non_dining_titles = [s.title for s in vrp_stops if s.category != "dining"]
+            hl_names = " & ".join(non_dining_titles[:2]) if non_dining_titles else f"{dest_geo.short_name} Highlights"
             days.append(
                 ItineraryDay(
                     day_number=day_num,
                     date_label=date_lbl,
                     weekday=weekday_lbl,
-                    headline=f"{dest_geo.short_name} Sector Loop: {morn.name} & {aft.name}",
-                    corridor_tag=f"{local_km:.0f} km Clustered Loop",
-                    drive_km=local_km,
-                    drive_time_label=local_lbl,
+                    headline=f"{dest_geo.short_name} VRPTW Loop: {hl_names}",
+                    corridor_tag=f"{loop_km:.0f} km 2-Opt VRPTW Loop",
+                    drive_km=loop_km,
+                    drive_time_label=_format_duration(loop_mins),
                     overnight_label=dest_stay.name,
-                    stops=stops,
+                    stops=vrp_stops,
                 )
             )
 
-    return days
+    all_segs = sorted(highway_segments + local_loop_segments, key=lambda s: s.day_number)
+    return days, all_segs, matrix_source
 
 
-async def solve_trip_pareto(spec: TripSpec) -> OptimizationResponse:
-    """End-to-end destination-agnostic Multi-Modal Arbitrage & Spatio-Temporal Pareto Solver."""
+async def solve_trip_pareto(
+    spec: TripSpec,
+    on_phase: Optional[PhaseEmitter] = None,
+    persist_snapshot: bool = True,
+) -> OptimizationResponse:
+    """End-to-end Multi-Modal Arbitrage + N×N Matrix 2-Opt VRPTW + Strict 3D Pareto Frontier Solver."""
     t0 = time.perf_counter()
     d_start, d_end, total_nights = _parse_trip_dates(spec.start_date, spec.end_date)
     outbound_pins, dest_in, dest_out, return_pins = _partition_stay_windows(
@@ -517,26 +533,43 @@ async def solve_trip_pareto(spec: TripSpec) -> OptimizationResponse:
     )
     active_pins = outbound_pins + return_pins
 
-    # Phase 1A: Concurrent Geocoding of Origin, Destination, and any Transit Cities
+    if on_phase:
+        await on_phase(
+            "Phase 1 · Intent & Constraints",
+            f"Geocoding {spec.origin} -> {spec.destination} & hydrating {total_nights}N calendar constraints...",
+        )
+
+    # Phase 1A: Concurrent Geocoding + Live ECB FX Lookup
     unique_pin_cities = list(dict.fromkeys(p.city for p in active_pins))
     geo_tasks = [geocode_place(spec.origin), geocode_place(spec.destination)] + [
         geocode_place(c) for c in unique_pin_cities
     ]
-    geo_results = await asyncio.gather(*geo_tasks)
+    fx_task = get_live_fx_rates()
+    geo_results, (fx_rates, fx_source) = await asyncio.gather(
+        asyncio.gather(*geo_tasks), fx_task
+    )
     origin_geo = geo_results[0]
     dest_geo = geo_results[1]
     pin_city_geos: Dict[str, GeoLocation] = {
         city: geo_results[2 + i] for i, city in enumerate(unique_pin_cities)
     }
+    active_currency = infer_currency_from_countries(
+        origin_geo.country_code, dest_geo.country_code, spec.currency
+    )
     t_phase1_geo = int(round((time.perf_counter() - t0) * 1000))
 
-    # Phase 1B: Build & Route Multi-Leg Corridor via Live Project OSRM
+    # Phase 1B: Route Multi-Leg Highway Corridor + Gateway Flight Arbitrage
+    if on_phase:
+        await on_phase(
+            "Phase 1 · Intent & Constraints",
+            f"Routing {spec.vehicle_name} highway geometry & scanning nearest gateway airports...",
+        )
     t_route_start = time.perf_counter()
-    flights = discover_gateway_flights(origin_geo, dest_geo, spec)
+    flights = await discover_gateway_flights(origin_geo, dest_geo, spec)
 
     leg_specs: List[Tuple[str, int, GeoLocation, GeoLocation]] = []
     if spec.transport_mode in ("flight", "hybrid") and not active_pins:
-        dest_hubs = nearest_airports(dest_geo.lat, dest_geo.lng, max_km=260.0, limit=1)
+        dest_hubs = nearest_airports(dest_geo.lat, dest_geo.lng, max_km=280.0, limit=1)
         if dest_hubs:
             hub, _ = dest_hubs[0]
             hub_geo = GeoLocation(
@@ -557,12 +590,7 @@ async def solve_trip_pareto(spec: TripSpec) -> OptimizationResponse:
         waypoints.append(dest_geo)
         for idx_w in range(len(waypoints) - 1):
             leg_specs.append(
-                (
-                    f"seg-out-{idx_w + 1}",
-                    day_cursor,
-                    waypoints[idx_w],
-                    waypoints[idx_w + 1],
-                )
+                (f"seg-out-{idx_w + 1}", day_cursor, waypoints[idx_w], waypoints[idx_w + 1])
             )
             day_cursor += 1
 
@@ -570,12 +598,7 @@ async def solve_trip_pareto(spec: TripSpec) -> OptimizationResponse:
         ret_day_start = max(2, total_nights + 2 - len(ret_waypoints))
         for idx_r in range(len(ret_waypoints) - 1):
             leg_specs.append(
-                (
-                    f"seg-ret-{idx_r + 1}",
-                    ret_day_start + idx_r,
-                    ret_waypoints[idx_r],
-                    ret_waypoints[idx_r + 1],
-                )
+                (f"seg-ret-{idx_r + 1}", ret_day_start + idx_r, ret_waypoints[idx_r], ret_waypoints[idx_r + 1])
             )
 
     routed_pairs = await asyncio.gather(
@@ -585,71 +608,86 @@ async def solve_trip_pareto(spec: TripSpec) -> OptimizationResponse:
     routing_sources = {pair[1] for pair in routed_pairs}
     t_route_ms = int(round((time.perf_counter() - t_route_start) * 1000))
 
-    # Phase 2: Concurrent Multi-Channel Stay Discovery, Deduplication & POI Scan
+    # Phase 2: Multi-Channel Stay Discovery, Entity Deduplication & Overpass POI Scan
+    if on_phase:
+        await on_phase(
+            "Phase 2 · Multi-Channel Arbitrage",
+            f"Deduplicating cross-channel stays (SerpApi / Blue Kite / Airbnb / OTAs) & POIs in {dest_geo.short_name}...",
+        )
     t_arb_start = time.perf_counter()
-    pinned_resolved_task = resolve_pinned_stays(active_pins, spec, pin_city_geos)
-    dest_stays_task = discover_destination_stays(dest_geo, spec, dest_in, dest_out)
-    pois_task = discover_pois(dest_geo.lat, dest_geo.lng, dest_geo.short_name, spec.activities)
-
     pinned_resolved, (dest_candidates, coverage_notes), (pois, poi_source) = await asyncio.gather(
-        pinned_resolved_task, dest_stays_task, pois_task
+        resolve_pinned_stays(active_pins, spec, pin_city_geos),
+        discover_destination_stays(dest_geo, spec, dest_in, dest_out),
+        discover_pois(dest_geo.lat, dest_geo.lng, dest_geo.short_name, spec.activities),
     )
     t_arb_ms = int(round((time.perf_counter() - t_arb_start) * 1000))
 
     outbound_resolved = pinned_resolved[: len(outbound_pins)]
     return_resolved = pinned_resolved[len(outbound_pins) :]
 
-    # Phase 3: Assemble Local Loop, Road Telemetry & Pareto Frontier Blueprints
+    # Phase 3: OSRM N×N Matrix + 2-Opt VRPTW + Strict 3D NSGA-II Pareto Frontier
+    if on_phase:
+        await on_phase(
+            "Phase 3 · Spatio-Temporal Solver",
+            f"Solving N×N OSRM travel-time matrix, 2-Opt VRPTW schedule & strict 3D Pareto frontier...",
+        )
     t_dag_start = time.perf_counter()
-    explore_days = max(1, total_nights - len(active_pins) - 1)
-    first_explore_day = len(outbound_pins) + 2
-    local_loop_seg = _build_local_loop_segment(
-        min(total_nights, first_explore_day),
-        dest_geo,
-        pois,
-        spec.vehicle_name,
-        explore_days,
-    )
-    all_segments = sorted(highway_segments + [local_loop_seg], key=lambda s: s.day_number)
-
     clearance_mm, km_per_l, _ = parse_vehicle_profile(spec.vehicle_name)
-    total_km = round(sum(s.distance_km for s in all_segments), 1)
-    total_mins = sum(s.duration_mins for s in all_segments)
-    total_fuel_inr = sum(s.fuel_estimate_inr for s in all_segments)
-    total_tolls_inr = sum(s.fastag_toll_inr for s in all_segments)
-    rental_inr = (2900 * (total_nights + 1)) if spec.transport_mode == "hybrid" else 0
-
-    road_summary = RoadSummary(
-        vehicle=spec.vehicle_name,
-        ground_clearance_mm=clearance_mm,
-        total_distance_km=total_km,
-        total_drive_hours=round(total_mins / 60.0, 1),
-        estimated_fuel_liters=round(total_km / max(1.0, km_per_l), 1),
-        fuel_cost_inr=total_fuel_inr,
-        fastag_and_forest_tolls_inr=total_tolls_inr,
-        rental_car_cost_inr=rental_inr,
-        total_road_cost_inr=total_fuel_inr + total_tolls_inr + rental_inr,
-        corridor_notes=[
-            f"Live corridor routed ({'Project OSRM GeoJSON' if 'osrm_live' in routing_sources else 'Geodesic Corridor'}): {total_km} km across {len(all_segments)} legs.",
-            f"POIs & regional dining clustered around {dest_geo.short_name} ({poi_source}) to minimize hill/city backtracking.",
-        ],
-        segments=all_segments,
-    )
-
     flight_landed = sum(f.landed_family_total_inr for f in flights)
     flight_unopt = sum(f.ota_unoptimized_inr for f in flights)
     pax = max(1, spec.party.adults + spec.party.children)
     est_dining_activities = int(round(pax * 820 * (total_nights + 1), -2))
 
-    bp_templates = [
-        ("Sweet-Spot Recommended", "Max Cross-Channel Arbitrage + Central Base", True),
-        ("Boutique Direct / Superhost Pick", "High Guest Rating + Curated Micro-Location", False),
-        ("Value All-In Frontier", "Lowest Total Landed Checkout + Smooth Access", False),
-    ]
+    # Solve exact VRPTW schedule per candidate stay so micro-location detours genuinely impact road cost & fatigue!
+    vrptw_results = await asyncio.gather(
+        *[
+            _build_vrptw_itinerary_for_stay(
+                spec=spec,
+                d_start=d_start,
+                d_end=d_end,
+                origin_geo=origin_geo,
+                dest_geo=dest_geo,
+                outbound_stays=outbound_resolved,
+                dest_stay=chosen_stay,
+                return_stays=return_resolved,
+                highway_segments=highway_segments,
+                pois=pois,
+                has_flights=bool(flights),
+            )
+            for chosen_stay in dest_candidates
+        ]
+    )
 
-    blueprints: List[ParetoBlueprint] = []
-    for idx, chosen_stay in enumerate(dest_candidates[:3]):
-        badge, sub, is_rec = bp_templates[idx % len(bp_templates)]
+    raw_blueprints: List[ParetoBlueprint] = []
+    matrix_sources: set[str] = set()
+
+    for idx, (chosen_stay, (days, stay_segments, mat_src)) in enumerate(
+        zip(dest_candidates, vrptw_results)
+    ):
+        matrix_sources.add(mat_src)
+        total_km = round(sum(s.distance_km for s in stay_segments), 1)
+        total_mins = sum(s.duration_mins for s in stay_segments)
+        total_fuel_inr = sum(s.fuel_estimate_inr for s in stay_segments)
+        total_tolls_inr = sum(s.fastag_toll_inr for s in stay_segments)
+        rental_inr = (2900 * (total_nights + 1)) if spec.transport_mode == "hybrid" else 0
+
+        road_summary = RoadSummary(
+            vehicle=spec.vehicle_name,
+            ground_clearance_mm=clearance_mm,
+            total_distance_km=total_km,
+            total_drive_hours=round(total_mins / 60.0, 1),
+            estimated_fuel_liters=round(total_km / max(1.0, km_per_l), 1),
+            fuel_cost_inr=total_fuel_inr,
+            fastag_and_forest_tolls_inr=total_tolls_inr,
+            rental_car_cost_inr=rental_inr,
+            total_road_cost_inr=total_fuel_inr + total_tolls_inr + rental_inr,
+            corridor_notes=[
+                f"Highway geometry ({'Project OSRM Live/Cached' if any('osrm' in s for s in routing_sources) else 'Geodesic Corridor'}): {total_km} km across {len(stay_segments)} legs.",
+                f"Daily POI loops solved via K-Medoids + 2-Opt VRPTW over N×N matrix ({mat_src}, {poi_source}).",
+            ],
+            segments=stay_segments,
+        )
+
         stays_chain = outbound_resolved + [chosen_stay] + return_resolved
         stays_best = sum(s.best_landed_inr for s in stays_chain)
         stays_worst = sum(s.worst_landed_inr for s in stays_chain)
@@ -658,12 +696,14 @@ async def solve_trip_pareto(spec: TripSpec) -> OptimizationResponse:
         unopt_landed = stays_worst + road_summary.total_road_cost_inr + flight_unopt
         savings = max(0, unopt_landed - core_landed)
 
-        avg_daily_drive_hrs = road_summary.total_drive_hours / max(1, total_nights + 1)
-        fatigue_score = min(65, max(16, int(round(avg_daily_drive_hrs * 8.2)) - idx))
-        quality_score = min(98, int(round(chosen_stay.rating * 19.6)))
+        # True fatigue index driven by actual daily driving minutes + checkpost/transfer load
+        avg_daily_mins = total_mins / float(max(1, total_nights + 1))
+        comfort_credit = 3 if chosen_stay.category in ("bluekite", "villa") else 0
+        fatigue_score = min(78, max(14, int(round(avg_daily_mins * 0.19)) - comfort_credit))
+        quality_score = min(99, int(round(chosen_stay.rating * 19.7)))
 
         callouts = [
-            f"{chosen_stay.name}: ₹{chosen_stay.best_landed_inr // max(1, chosen_stay.nights):,}/night landed via {chosen_stay.best_channel}.",
+            f"{chosen_stay.name}: ₹{chosen_stay.best_landed_inr // max(1, chosen_stay.nights):,}/night landed via {chosen_stay.best_channel} ({chosen_stay.provenance_label}).",
         ]
         if chosen_stay.savings_inr > 0:
             callouts.append(
@@ -675,7 +715,7 @@ async def solve_trip_pareto(spec: TripSpec) -> OptimizationResponse:
             callouts.append(f"Transit Anchor Split-Channel Win: {pin_channels} saves ₹{pin_saved:,}.")
         if flights:
             callouts.append(
-                f"Gateway Flight Arbitrage ({flights[0].route_label}): Saves ₹{flights[0].savings_inr:,} vs. unbundled OTA fare."
+                f"Gateway Flight Arbitrage ({flights[0].route_label}): Saves ₹{flights[0].savings_inr:,} ({flights[0].provenance_label})."
             )
 
         anchor_suffix = (
@@ -684,27 +724,13 @@ async def solve_trip_pareto(spec: TripSpec) -> OptimizationResponse:
             else ""
         )
 
-        days = _build_dynamic_itinerary(
-            spec=spec,
-            d_start=d_start,
-            d_end=d_end,
-            origin_geo=origin_geo,
-            dest_geo=dest_geo,
-            outbound_stays=outbound_resolved,
-            dest_stay=chosen_stay,
-            return_stays=return_resolved,
-            segments=all_segments,
-            pois=pois,
-            has_flights=bool(flights),
-        )
-
-        blueprints.append(
+        raw_blueprints.append(
             ParetoBlueprint(
-                id=f"bp-{idx + 1}",
-                rank_badge=badge,
+                id=f"cand-{idx + 1}",
+                rank_badge="Candidate",
                 name=f"{chosen_stay.name}{anchor_suffix}",
-                strategy_subtitle=sub,
-                recommended=is_rec,
+                strategy_subtitle="",
+                recommended=False,
                 total_core_landed_inr=core_landed,
                 unoptimized_baseline_inr=unopt_landed,
                 total_arbitrage_savings_inr=savings,
@@ -720,48 +746,79 @@ async def solve_trip_pareto(spec: TripSpec) -> OptimizationResponse:
             )
         )
 
-    t_dag_ms = max(12, int(round((time.perf_counter() - t_dag_start) * 1000)))
+    blueprints = strict_pareto_rank_and_filter(raw_blueprints)
+    front1_count = sum(1 for b in blueprints if b.pareto_front_rank == 1)
+
+    t_dag_ms = max(14, int(round((time.perf_counter() - t_dag_start) * 1000)))
     bk_cov = next((c for c in coverage_notes if c.platform == "The Blue Kite"), None)
 
     traces = [
         ToolCallTrace(
             phase="Phase 1 · Intent & Constraints",
-            tool_name="nominatim_geocoder_and_spec_hydrator",
+            tool_name="nominatim_geocoder_and_ecb_fx_hydrator",
             latency_ms=max(18, t_phase1_geo),
             input_summary=f"{spec.origin} -> {spec.destination} ({spec.start_date}..{spec.end_date}) · {spec.party.adults}A+{spec.party.children}C",
-            finding_summary=f"Resolved {origin_geo.short_name} ({origin_geo.lat:.2f},{origin_geo.lng:.2f}) -> {dest_geo.short_name} ({dest_geo.lat:.2f},{dest_geo.lng:.2f}) [{origin_geo.source}].",
+            finding_summary=(
+                f"Resolved {origin_geo.short_name} ({origin_geo.lat:.2f},{origin_geo.lng:.2f}) -> "
+                f"{dest_geo.short_name} ({dest_geo.lat:.2f},{dest_geo.lng:.2f}) [{origin_geo.source}] · Currency {active_currency} ({fx_source})."
+            ),
         ),
         ToolCallTrace(
             phase="Phase 1 · Intent & Constraints",
-            tool_name="osrm_corridor_and_gate_router",
-            latency_ms=max(25, t_route_ms),
-            input_summary=f"{len(leg_specs)} driving legs · {spec.vehicle_name} ({spec.transport_mode} mode)",
-            finding_summary=f"Routed {total_km} km ({road_summary.total_drive_hours}h) · Fuel ₹{total_fuel_inr:,} · Tolls ₹{total_tolls_inr:,}.",
+            tool_name="osrm_corridor_and_gateway_router",
+            latency_ms=max(22, t_route_ms),
+            input_summary=f"{len(leg_specs)} highway legs · {spec.vehicle_name} ({spec.transport_mode} mode)",
+            finding_summary=(
+                f"Routed {blueprints[0].road.total_distance_km} km ({blueprints[0].road.total_drive_hours}h) · "
+                f"Fuel ₹{blueprints[0].road.fuel_cost_inr:,} · Tolls ₹{blueprints[0].road.fastag_and_forest_tolls_inr:,}."
+            ),
         ),
         ToolCallTrace(
             phase="Phase 2 · Multi-Channel Arbitrage",
-            tool_name="multi_channel_stay_and_flight_deduplicator",
+            tool_name="serpapi_bluekite_ota_entity_deduplicator",
             status="pivoted" if (bk_cov and bk_cov.status == "zero_inventory_pivoted") else "completed",
-            latency_ms=max(40, t_arb_ms),
-            input_summary=f"The Blue Kite + Airbnb + StayVista + OTAs in {dest_geo.short_name} ({spec.stay_strategy})",
+            latency_ms=max(35, t_arb_ms),
+            input_summary=f"Cross-OTA & Direct Villa scan in {dest_geo.short_name} ({spec.stay_strategy})",
             finding_summary=(
-                f"{bk_cov.note} Top savings: ₹{blueprints[0].total_arbitrage_savings_inr:,}."
+                f"{bk_cov.note} Top savings: ₹{blueprints[0].total_arbitrage_savings_inr:,} ({blueprints[0].stays[0].price_provenance})."
                 if bk_cov
-                else f"Matched {len(dest_candidates)} deduplicated stays."
+                else f"Evaluated {len(dest_candidates)} deduplicated stays · Saves ₹{blueprints[0].total_arbitrage_savings_inr:,}."
             ),
         ),
         ToolCallTrace(
             phase="Phase 3 · Spatio-Temporal Solver",
-            tool_name="pareto_itinerary_dag_solver",
+            tool_name="nsga2_pareto_and_2opt_vrptw_solver",
             latency_ms=t_dag_ms,
-            input_summary=f"Cluster {len(pois)} POIs/restaurants across {total_nights + 1} days",
-            finding_summary=f"Solved {len(blueprints)} Pareto blueprints; recommended core ₹{blueprints[0].total_core_landed_inr:,}.",
+            input_summary=f"N×N matrix ({', '.join(sorted(matrix_sources))}) · {len(pois)} POIs · {len(raw_blueprints)} bundles",
+            finding_summary=(
+                f"Isolated {front1_count} strictly non-dominated Front-1 blueprints; "
+                f"Pareto Knee '{blueprints[0].name}' @ ₹{blueprints[0].total_core_landed_inr:,}."
+            ),
         ),
     ]
 
-    return OptimizationResponse(
-        trip_spec=spec,
+    spec_out = spec.model_copy(deep=True)
+    if spec_out.currency is None:
+        spec_out.currency = active_currency
+
+    resp = OptimizationResponse(
+        active_currency=active_currency,
+        fx_rates=fx_rates,
+        pareto_frontier_note=(
+            f"NSGA-II Non-Dominated 3D Frontier ({front1_count} Front-1 Bundles across Cost × Fatigue × Utility) "
+            f"+ 2-Opt VRPTW Time-Windowed Daily Tours"
+        ),
+        trip_spec=spec_out,
         platform_coverage=coverage_notes,
         tool_trace=traces,
         blueprints=blueprints,
     )
+
+    if persist_snapshot:
+        tid = save_trip_snapshot(
+            spec_dict=spec_out.model_dump(),
+            optimization_dict=resp.model_dump(),
+        )
+        resp.trip_id = tid
+
+    return resp

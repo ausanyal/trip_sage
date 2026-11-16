@@ -2,15 +2,25 @@
 
 import React, { useId } from "react";
 import { SlidersHorizontal } from "lucide-react";
-import type { StayStrategy, TransportMode, TripSpec } from "@/types/trip";
+import {
+  formatMoney,
+  type CurrencyCode,
+  type StayStrategy,
+  type TransportMode,
+  type TripSpec,
+} from "@/types/trip";
 
 interface TripParametersDrawerProps {
   spec: TripSpec;
+  currency?: CurrencyCode;
+  fxRates?: Record<string, number>;
   onUpdateSpec: (nextSpec: TripSpec, reasonLabel: string) => void;
 }
 
 export function TripParametersDrawer({
   spec,
+  currency = "INR",
+  fxRates,
   onUpdateSpec,
 }: TripParametersDrawerProps) {
   const baseId = useId();
@@ -53,11 +63,13 @@ export function TripParametersDrawer({
           }}
         >
           <SlidersHorizontal size={17} aria-hidden="true" color="var(--accent-primary)" />
-          Bi-Directional Trip Spec (Synced with Chatbot)
+          Bi-Directional Trip Spec (Synced with Chatbot &amp; URL Permalink)
         </h2>
         <span style={{ fontSize: "0.76rem", color: "var(--text-muted)" }}>
-          Party: {spec.party.adults} Adults + {spec.party.children} Kids (Ages{" "}
-          {spec.party.child_ages.join(" & ")})
+          Party: {spec.party.adults} Adults + {spec.party.children} Kids
+          {spec.party.child_ages.length > 0
+            ? ` (Ages ${spec.party.child_ages.join(" & ")})`
+            : ""}
         </span>
       </div>
 
@@ -190,8 +202,8 @@ export function TripParametersDrawer({
                 );
               }}
             >
-              <option value={1}>1 BHK Cottage</option>
-              <option value={2}>2 BHK Family Villa (Selected)</option>
+              <option value={1}>1 BHK Cottage / Suite</option>
+              <option value={2}>2 BHK Family Villa</option>
               <option value={3}>3 BHK Estate Villa</option>
               <option value={4}>4 BHK Grand Villa</option>
             </select>
@@ -199,14 +211,14 @@ export function TripParametersDrawer({
 
           <div className="field-group">
             <label htmlFor={`${baseId}-budget`}>
-              Villa Nightly Ceiling: ₹{(spec.nightly_budget_max_inr / 1000).toFixed(0)}k / night
+              Nightly Ceiling: {formatMoney(spec.nightly_budget_max_inr, currency, fxRates)} / night
             </label>
             <input
               id={`${baseId}-budget`}
               name="budget_max"
               type="range"
-              min={12000}
-              max={40000}
+              min={10000}
+              max={60000}
               step={1000}
               value={spec.nightly_budget_max_inr}
               onChange={(e) => {
@@ -214,19 +226,19 @@ export function TripParametersDrawer({
                 onUpdateSpec(
                   {
                     ...spec,
-                    nightly_budget_min_inr: Math.max(10000, maxVal - 5000),
+                    nightly_budget_min_inr: Math.max(8000, maxVal - 5000),
                     nightly_budget_max_inr: maxVal,
                   },
-                  `Villa Ceiling -> ₹${maxVal / 1000}k/night`
+                  `Nightly Ceiling -> ${formatMoney(maxVal, currency, fxRates)}/night`
                 );
               }}
             />
           </div>
         </div>
 
-        {/* Row 3: Family Curation Checkboxes */}
+        {/* Row 3: VRPTW Curation & Activity Filters */}
         <fieldset className="radio-fieldset">
-          <legend>3. Family Curation &amp; Activity Filters (Kids Ages 8 &amp; 10)</legend>
+          <legend>3. VRPTW Curation &amp; Activity Time-Window Filters</legend>
           <div className="radio-row">
             <label htmlFor={`${baseId}-climbs`} className="choice-label">
               <input
@@ -244,7 +256,7 @@ export function TripParametersDrawer({
                   )
                 }
               />
-              <span>Moderate Climbs (Edakkal / Soochipara)</span>
+              <span>Morning Scenic Climbs &amp; Trails</span>
             </label>
 
             <label htmlFor={`${baseId}-safari`} className="choice-label">
@@ -263,7 +275,7 @@ export function TripParametersDrawer({
                   )
                 }
               />
-              <span>Wildlife Jeep Safari</span>
+              <span>Wildlife &amp; Reserve Safari</span>
             </label>
 
             <label htmlFor={`${baseId}-water`} className="choice-label">
@@ -278,17 +290,17 @@ export function TripParametersDrawer({
                       ...spec,
                       activities: { ...spec.activities, adventure_water: e.target.checked },
                     },
-                    `Water & Ziplines -> ${e.target.checked ? "Yes" : "No"}`
+                    `Adventure & Water -> ${e.target.checked ? "Yes" : "No"}`
                   )
                 }
               />
-              <span>Adventure &amp; Water Rides</span>
+              <span>Adventure &amp; Water Sports</span>
             </label>
 
-            <label htmlFor={`${baseId}-mysuru`} className="choice-label">
+            <label htmlFor={`${baseId}-transit`} className="choice-label">
               <input
                 type="checkbox"
-                id={`${baseId}-mysuru`}
+                id={`${baseId}-transit`}
                 name="transit_sightseeing"
                 checked={spec.activities.transit_sightseeing}
                 onChange={(e) =>
@@ -300,11 +312,11 @@ export function TripParametersDrawer({
                         transit_sightseeing: e.target.checked,
                       },
                     },
-                    `Mysuru Stops -> ${e.target.checked ? "Yes" : "No"}`
+                    `Transit Sightseeing -> ${e.target.checked ? "Yes" : "No"}`
                   )
                 }
               />
-              <span>Mysuru Sightseeing Stops</span>
+              <span>En-Route Transit Sightseeing</span>
             </label>
           </div>
         </fieldset>

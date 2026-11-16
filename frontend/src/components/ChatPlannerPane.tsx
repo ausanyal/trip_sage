@@ -11,11 +11,12 @@ import {
   Sparkles,
   User,
 } from "lucide-react";
-import type { ChatMessage } from "@/types/trip";
+import type { ChatMessage, LivePhaseStatus } from "@/types/trip";
 
 interface ChatPlannerPaneProps {
   messages: ChatMessage[];
   isPlanning: boolean;
+  livePhase?: LivePhaseStatus | null;
   onSendMessage: (message: string) => void;
 }
 
@@ -29,6 +30,7 @@ const QUICK_PROMPTS = [
 export function ChatPlannerPane({
   messages,
   isPlanning,
+  livePhase,
   onSendMessage,
 }: ChatPlannerPaneProps) {
   const [draft, setDraft] = useState("");
@@ -39,7 +41,7 @@ export function ChatPlannerPane({
 
   useEffect(() => {
     scrollEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length, isPlanning]);
+  }, [messages.length, isPlanning, livePhase?.phase]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,12 +91,12 @@ export function ChatPlannerPane({
               TripSage Planner Agent
             </div>
             <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
-              3-Phase Tool-Calling · Live Form Sync
+              SSE 3-Phase Streaming · VRPTW + Pareto
             </div>
           </div>
         </div>
         <span className="badge badge-emerald">
-          <Sparkles size={11} aria-hidden="true" /> Active
+          <Sparkles size={11} aria-hidden="true" /> v3.0 Live
         </span>
       </div>
 
@@ -273,20 +275,32 @@ export function ChatPlannerPane({
             <li
               aria-live="polite"
               style={{
-                padding: "0.75rem 0.9rem",
-                borderRadius: "0.75rem",
+                padding: "0.8rem 0.95rem",
+                borderRadius: "0.8rem",
                 background: "var(--bg-elevated)",
-                border: "1px solid var(--border-subtle)",
-                fontSize: "0.82rem",
+                border: "1px solid var(--accent-primary)",
+                fontSize: "0.8rem",
                 display: "flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                color: "var(--accent-primary)",
-                fontWeight: 600,
+                flexDirection: "column",
+                gap: "0.35rem",
               }}
             >
-              <RefreshCw size={15} aria-hidden="true" />
-              Running 3-phase planner &amp; channel rate deduplicator...
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.45rem",
+                  color: "var(--accent-primary)",
+                  fontWeight: 700,
+                }}
+              >
+                <RefreshCw size={14} aria-hidden="true" className="spin-icon" />
+                <span>{livePhase?.phase ?? "Phase 1 · Intent & Constraints"}</span>
+              </div>
+              <div style={{ color: "var(--text-secondary)", fontSize: "0.75rem" }}>
+                {livePhase?.detail ??
+                  "Streaming live OSRM routing, cross-OTA rate deduplication & 2-Opt VRPTW solver..."}
+              </div>
             </li>
           )}
         </ul>
@@ -351,7 +365,7 @@ export function ChatPlannerPane({
               lastCompositionEndRef.current = e.nativeEvent.timeStamp;
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Chat to adjust stays, budget, mode, or stops..."
+            placeholder="Chat any city worldwide, budget, currency, or stay strategy..."
             className="chat-textarea"
             style={{ flex: 1, resize: "vertical", minBlockSize: "3rem" }}
           />

@@ -11,15 +11,16 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 from dotenv import load_dotenv
 
+from currency import format_amount_from_inr
+from db import save_trip_snapshot
 from models import (
     ChatTurnRequest,
     ChatTurnResponse,
     ToolCallTrace,
     TripSpec,
 )
-from solver.pareto_dag import solve_trip_pareto
+from solver.pareto_dag import PhaseEmitter, solve_trip_pareto
 
-# Load .env from workspace root or backend directory
 _ROOT_ENV = Path(__file__).resolve().parent.parent / ".env"
 _LOCAL_ENV = Path(__file__).resolve().parent / ".env"
 load_dotenv(_ROOT_ENV)
@@ -38,13 +39,14 @@ Given the current structured `TripSpec` JSON, conversation history, and the user
 
 Rules:
 1. Preserve all fields from `current_spec` that the user did NOT ask to change.
-2. If the user switches to a brand-new `destination`, reset `pinned_stays` to `[]` unless the user explicitly mentions transit stops for the new trip.
+2. If the user switches to a brand-new `destination`, reset `pinned_stays` to `[]` and set `currency` to `null` (so auto-detection adapts to the new country) unless explicitly specified.
 3. `transport_mode` MUST be one of: "road", "flight", "hybrid".
 4. `stay_strategy` MUST be one of: "hotels", "villas", "hybrid".
 5. `activities.dietary` MUST be one of: "veg", "non_veg", "both".
 6. `activities.pace` MUST be one of: "relaxed", "balanced", "explorer".
-7. Dates (`start_date`, `end_date`, `check_in`, `check_out`) MUST be ISO `YYYY-MM-DD`.
-8. Set `needs_clarification` to true (with 2-4 crisp questions) ONLY when the user starts a brand-new trip with underspecified transport mode, stay preference, or party/budget.
+7. `currency` MUST be one of: "INR", "USD", "EUR", "GBP", or null.
+8. Dates (`start_date`, `end_date`, `check_in`, `check_out`) MUST be ISO `YYYY-MM-DD`.
+9. Set `needs_clarification` to true (with 2-4 crisp questions) ONLY when the user starts a brand-new trip with underspecified transport mode, stay preference, or party/budget.
 """
 
 
@@ -105,7 +107,7 @@ async def _call_gemini_spec_extractor(
 
 def _clean_place_phrase(raw: str) -> str:
     cleaned = re.split(
-        r"\b(?:from|on|between|for|with|in\s+dec|in\s+jan|staying|via|prefer|driving|and\s+we)\b",
+        r"\b(?:from|on|between|for|with|in\s+a\s+\d|in\s+dec|in\s+jan|staying|via|prefer|driving|and\s+we)\b",
         raw,
         maxsplit=1,
         flags=re.IGNORECASE,
@@ -138,6 +140,7 @@ def _deterministic_nlp_extract(req: ChatTurnRequest) -> Tuple[TripSpec, List[str
             if cand_dest.lower() not in spec.destination.lower():
                 spec.destination = cand_dest
                 spec.pinned_stays = []
+                spec.currency = None
                 dest_switched = True
                 updates.append(f"Destination -> {cand_dest}")
     else:
@@ -151,6 +154,7 @@ def _deterministic_nlp_extract(req: ChatTurnRequest) -> Tuple[TripSpec, List[str
             if len(cand_dest) >= 3 and cand_dest.lower() not in spec.destination.lower():
                 spec.destination = cand_dest
                 spec.pinned_stays = []
+                spec.currency = None
                 dest_switched = True
                 updates.append(f"Destination -> {cand_dest}")
 
@@ -171,7 +175,21 @@ def _deterministic_nlp_extract(req: ChatTurnRequest) -> Tuple[TripSpec, List[str
             except ValueError:
                 pass
 
-    # 3. Transport Mode
+    # 3. Currency preference
+    if any(w in lower for w in ["in usd", "to usd", "us dollars"]):
+        spec.currency = "USD"
+        updates.append("Currency -> USD")
+    elif any(w in lower for w in ["in eur", "to eur", "in euros"]):
+        spec.currency = "EUR"
+        updates.append("Currency -> EUR")
+    elif any(w in lower for w in ["in gbp", "to gbp", "in pounds"]):
+        spec.currency = "GBP"
+        updates.append("Currency -> GBP")
+    elif any(w in lower for w in ["in inr", "to inr", "in rupees"]):
+        spec.currency = "INR"
+        updates.append("Currency -> INR")
+
+    # 4. Transport Mode
     if any(p in lower for p in ["fly + drive", "fly and drive", "hybrid", "rent a car", "fly somewhere and"]):
         if "hybrid stay" not in lower:
             spec.transport_mode = "hybrid"
@@ -183,7 +201,7 @@ def _deterministic_nlp_extract(req: ChatTurnRequest) -> Tuple[TripSpec, List[str
         spec.transport_mode = "road"
         updates.append("Transport Mode -> Pure Road Trip")
 
-    # 4. Stay Strategy
+    # 5. Stay Strategy
     if any(p in lower for p in ["hotels only", "only hotel", "switch to hotel", "resorts only"]):
         spec.stay_strategy = "hotels"
         updates.append("Stay Strategy -> Hotels & Resorts Only")
@@ -194,7 +212,7 @@ def _deterministic_nlp_extract(req: ChatTurnRequest) -> Tuple[TripSpec, List[str
         spec.stay_strategy = "hybrid"
         updates.append("Stay Strategy -> Hybrid Stays")
 
-    # 5. Party composition ("2 adults", "2 kids", "ages 8 and 10")
+    # 6. Party composition
     ad_m = re.search(r"(\d+)\s*adults?", lower)
     if ad_m:
         spec.party.adults = max(1, int(ad_m.group(1)))
@@ -210,7 +228,7 @@ def _deterministic_nlp_extract(req: ChatTurnRequest) -> Tuple[TripSpec, List[str
             ages.append(int(ages_m.group(2)))
         spec.party.child_ages = ages
 
-    # 6. Villa BHK & Nightly Budget
+    # 7. Villa BHK & Nightly Budget
     bhk_m = re.search(r"(\d)\s*(?:bhk|br|bedroom)", lower)
     if bhk_m:
         spec.destination_villa_bhk = max(1, min(6, int(bhk_m.group(1))))
@@ -230,7 +248,7 @@ def _deterministic_nlp_extract(req: ChatTurnRequest) -> Tuple[TripSpec, List[str
             spec.nightly_budget_max_inr = hi_k * 1000
             updates.append(f"Nightly Budget -> up to ₹{hi_k}k")
 
-    # 7. Vehicle
+    # 8. Vehicle
     veh_m = re.search(
         r"(?:driving\s+(?:a|an|our)?|vehicle\s+is|car\s+is)\s+([A-Za-z0-9][A-Za-z0-9\s-]{2,26})",
         msg,
@@ -241,7 +259,7 @@ def _deterministic_nlp_extract(req: ChatTurnRequest) -> Tuple[TripSpec, List[str
         spec.vehicle_name = v_clean
         updates.append(f"Vehicle -> {v_clean}")
 
-    # 8. Activity & Dietary Toggles
+    # 9. Activity & Dietary Toggles
     if any(p in lower for p in ["turn on wildlife", "add safari", "include safari", "enable safari", "with safari"]):
         spec.activities.wildlife_safari = True
         updates.append("Wildlife Safari -> ON")
@@ -276,10 +294,19 @@ def _deterministic_nlp_extract(req: ChatTurnRequest) -> Tuple[TripSpec, List[str
     return spec, updates, needs_clar
 
 
-async def process_chat_turn(req: ChatTurnRequest) -> ChatTurnResponse:
-    """Multi-Phase Conversational Planner: Gemini API primary + deterministic NLP fallback."""
+async def process_chat_turn(
+    req: ChatTurnRequest,
+    on_phase: Optional[PhaseEmitter] = None,
+) -> ChatTurnResponse:
+    """Multi-Phase Conversational Planner: Gemini API primary + deterministic NLP fallback + SSE hooks."""
     api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
     model_name = (os.getenv("GEMINI_MODEL") or "gemini-2.5-flash").strip()
+
+    if on_phase:
+        await on_phase(
+            "Phase 1 · Intent & Constraints",
+            "Extracting structured trip intent, party constraints & currency preferences...",
+        )
 
     gemini_result = None
     if api_key:
@@ -287,7 +314,7 @@ async def process_chat_turn(req: ChatTurnRequest) -> ChatTurnResponse:
 
     if gemini_result is not None:
         updated_spec, updates, needs_clar, questions, preface, llm_ms = gemini_result
-        opt = await solve_trip_pareto(updated_spec)
+        opt = await solve_trip_pareto(updated_spec, on_phase=on_phase, persist_snapshot=False)
         opt.tool_trace.insert(
             0,
             ToolCallTrace(
@@ -299,14 +326,21 @@ async def process_chat_turn(req: ChatTurnRequest) -> ChatTurnResponse:
             ),
         )
         top_bp = opt.blueprints[0]
+        fmt_core = format_amount_from_inr(top_bp.total_core_landed_inr, opt.active_currency, opt.fx_rates)
+        fmt_save = format_amount_from_inr(top_bp.total_arbitrage_savings_inr, opt.active_currency, opt.fx_rates)
         reply = (
             f"{preface + ' ' if preface else ''}"
-            f"Solved **{len(opt.blueprints)} Pareto blueprints** for **{updated_spec.origin} -> {updated_spec.destination}** — "
-            f"top pick **{top_bp.name}** lands at **₹{top_bp.total_core_landed_inr:,}** core all-in "
-            f"(saving **₹{top_bp.total_arbitrage_savings_inr:,}** via cross-channel arbitrage)."
+            f"Solved **{len(opt.blueprints)} non-dominated Pareto blueprints** for **{opt.trip_spec.origin} -> {opt.trip_spec.destination}** — "
+            f"Pareto Knee **{top_bp.name}** lands at **{fmt_core}** core all-in "
+            f"(saving **{fmt_save}** via cross-channel arbitrage)."
         )
+        transcript = [m.model_dump() for m in req.history] + [
+            {"role": "user", "content": req.message},
+            {"role": "assistant", "content": reply, "extracted_updates": updates},
+        ]
+        opt.trip_id = save_trip_snapshot(opt.trip_spec.model_dump(), opt.model_dump(), transcript)
         return ChatTurnResponse(
-            updated_spec=updated_spec,
+            updated_spec=opt.trip_spec,
             assistant_reply=reply,
             extracted_updates=updates or ["Gemini Spec Synced"],
             needs_clarification=needs_clar,
@@ -314,44 +348,46 @@ async def process_chat_turn(req: ChatTurnRequest) -> ChatTurnResponse:
             optimization=opt,
         )
 
-    # Zero-key fallback: deterministic destination-agnostic NLP + live OSRM/OSM/BlueKite Pareto solver
+    # Zero-key fallback: deterministic destination-agnostic NLP + live OSRM/OSM/BlueKite/VRPTW Pareto solver
     updated_spec, updates, needs_clar = _deterministic_nlp_extract(req)
-    opt = await solve_trip_pareto(updated_spec)
+    opt = await solve_trip_pareto(updated_spec, on_phase=on_phase, persist_snapshot=False)
     top_bp = opt.blueprints[0]
+    fmt_core = format_amount_from_inr(top_bp.total_core_landed_inr, opt.active_currency, opt.fx_rates)
+    fmt_save = format_amount_from_inr(top_bp.total_arbitrage_savings_inr, opt.active_currency, opt.fx_rates)
 
     if needs_clar:
         questions = [
-            f"For **{updated_spec.destination}**, do you prefer a **Pure Road Trip**, **Fly + Stay**, or **Hybrid (Fly + Rental Car)**?",
+            f"For **{opt.trip_spec.destination}**, do you prefer a **Pure Road Trip**, **Fly + Stay**, or **Hybrid (Fly + Rental Car)**?",
             "Should we focus on **Hotels & Resorts**, **Villas (Airbnb / The Blue Kite)**, or **Hybrid Stays**?",
             "What dates, party size, and nightly budget band should we lock in?",
         ]
         reply = (
-            f"Initialized a live route & arbitrage blueprint for **{updated_spec.origin} -> {updated_spec.destination}** "
-            f"(currently **₹{top_bp.total_core_landed_inr:,}** core all-in). Confirm any of these to refine:"
+            f"Initialized a live VRPTW route & Pareto arbitrage blueprint for **{opt.trip_spec.origin} -> {opt.trip_spec.destination}** "
+            f"(currently **{fmt_core}** core all-in). Confirm any of these to refine:"
         )
-        return ChatTurnResponse(
-            updated_spec=updated_spec,
-            assistant_reply=reply,
-            extracted_updates=updates or ["Draft Route Initialized"],
-            needs_clarification=True,
-            follow_up_questions=questions,
-            optimization=opt,
+    else:
+        change_note = (
+            f"Applied updates ({', '.join(updates)}) and re-solved the N×N VRPTW matrix & Pareto frontier. "
+            if updates
+            else "Re-verified live routing, 2-Opt VRPTW time windows, and cross-channel checkout math. "
         )
+        reply = (
+            f"{change_note}Pareto Knee: **{top_bp.name}** at **{fmt_core}** core all-in "
+            f"(saving **{fmt_save}** across channels)."
+        )
+        questions = []
 
-    change_note = (
-        f"Applied updates ({', '.join(updates)}) and re-solved the live corridor & channel rates. "
-        if updates
-        else "Re-verified live routing, POIs, and cross-channel checkout math. "
-    )
-    reply = (
-        f"{change_note}Top recommendation: **{top_bp.name}** at **₹{top_bp.total_core_landed_inr:,}** core all-in "
-        f"(saving **₹{top_bp.total_arbitrage_savings_inr:,}** across channels)."
-    )
+    transcript = [m.model_dump() for m in req.history] + [
+        {"role": "user", "content": req.message},
+        {"role": "assistant", "content": reply, "extracted_updates": updates},
+    ]
+    opt.trip_id = save_trip_snapshot(opt.trip_spec.model_dump(), opt.model_dump(), transcript)
+
     return ChatTurnResponse(
-        updated_spec=updated_spec,
+        updated_spec=opt.trip_spec,
         assistant_reply=reply,
-        extracted_updates=updates or ["Live Corridor & Channel Re-Scan"],
-        needs_clarification=False,
-        follow_up_questions=[],
+        extracted_updates=updates or ["Live VRPTW & Pareto Re-Scan"],
+        needs_clarification=needs_clar,
+        follow_up_questions=questions,
         optimization=opt,
     )

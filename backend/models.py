@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
 TransportMode = Literal["road", "flight", "hybrid"]
 StayStrategy = Literal["hotels", "villas", "hybrid"]
 DietaryPreference = Literal["veg", "non_veg", "both"]
+CurrencyCode = Literal["INR", "USD", "EUR", "GBP"]
+PriceProvenance = Literal["live_verified", "live_scraped", "estimated_benchmark"]
 
 
 class TravelParty(BaseModel):
@@ -47,6 +49,7 @@ class TripSpec(BaseModel):
     destination_villa_bhk: int = 2
     nightly_budget_min_inr: int = 12000
     nightly_budget_max_inr: int = 20000
+    currency: Optional[CurrencyCode] = None
     party: TravelParty = Field(default_factory=TravelParty)
     pinned_stays: List[PinnedStaySpec] = Field(default_factory=list)
     activities: ActivityPreferences = Field(default_factory=ActivityPreferences)
@@ -94,6 +97,8 @@ class StayCandidate(BaseModel):
     savings_inr: int
     deal_anomaly_score: float = Field(description="0-100 score indicating value vs comp tier")
     anomaly_badge: str
+    price_provenance: PriceProvenance = "estimated_benchmark"
+    provenance_label: str = "Market Benchmark (Set SERPAPI_API_KEY for Live OTA Checkout)"
 
 
 class FlightOption(BaseModel):
@@ -110,6 +115,9 @@ class FlightOption(BaseModel):
     ota_unoptimized_inr: int
     savings_inr: int
     booking_channel: str
+    booking_url: str = "https://www.google.com/travel/flights"
+    price_provenance: PriceProvenance = "estimated_benchmark"
+    provenance_label: str = "Distance Airfare Benchmark (Set SERPAPI_API_KEY for Live Fares)"
 
 
 class RoadSegment(BaseModel):
@@ -155,6 +163,7 @@ class TimelineStop(BaseModel):
     dietary_note: Optional[str] = None
     kid_note: Optional[str] = None
     insider_tip: Optional[str] = None
+    drive_from_prev_mins: Optional[int] = None
 
 
 class ItineraryDay(BaseModel):
@@ -182,6 +191,8 @@ class ParetoBlueprint(BaseModel):
     name: str
     strategy_subtitle: str
     recommended: bool = False
+    pareto_front_rank: int = 1
+    crowding_distance: float = 1.0
     total_core_landed_inr: int
     unoptimized_baseline_inr: int
     total_arbitrage_savings_inr: int
@@ -210,6 +221,14 @@ class ToolCallTrace(BaseModel):
 
 
 class OptimizationResponse(BaseModel):
+    trip_id: Optional[str] = None
+    active_currency: CurrencyCode = "INR"
+    fx_rates: Dict[str, float] = Field(
+        default_factory=lambda: {"INR": 1.0, "USD": 0.0118, "EUR": 0.0109, "GBP": 0.0093}
+    )
+    pareto_frontier_note: str = (
+        "Strict Non-Dominated 3D Pareto Frontier (Cost × Fatigue × Utility) + 2-Opt VRPTW Schedule"
+    )
     trip_spec: TripSpec
     platform_coverage: List[PlatformCoverageNote]
     tool_trace: List[ToolCallTrace]
@@ -237,3 +256,19 @@ class ChatTurnResponse(BaseModel):
     needs_clarification: bool = False
     follow_up_questions: List[str] = Field(default_factory=list)
     optimization: Optional[OptimizationResponse] = None
+
+
+class SaveTripRequest(BaseModel):
+    spec: TripSpec
+    optimization: OptimizationResponse
+    messages: List[Dict[str, Any]] = Field(default_factory=list)
+    trip_id: Optional[str] = None
+
+
+class SavedTripPayload(BaseModel):
+    trip_id: str
+    created_at: str
+    title: str
+    spec: TripSpec
+    optimization: OptimizationResponse
+    messages: List[Dict[str, Any]] = Field(default_factory=list)

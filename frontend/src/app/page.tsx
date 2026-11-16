@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   ArrowRight,
   Award,
@@ -11,36 +11,51 @@ import {
   Flame,
   Fuel,
   Hotel,
+  Info,
   Layers,
+  Link2,
   MapPin,
   Moon,
   Mountain,
   Plane,
   Search,
+  Share2,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   Sun,
   TrendingDown,
   Utensils,
+  X,
 } from "lucide-react";
 import presetsRaw from "@/data/presets.json";
 import { ChatPlannerPane } from "@/components/ChatPlannerPane";
 import { DealArbitrageDialog } from "@/components/DealArbitrageDialog";
 import { RouteCorridorMap } from "@/components/RouteCorridorMap";
 import { TripParametersDrawer } from "@/components/TripParametersDrawer";
-import type {
-  ChatMessage,
-  OptimizationResponse,
-  StayCandidate,
-  TimelineStop,
-  TripSpec,
+import {
+  DEFAULT_FX_RATES,
+  formatMoney,
+  type ChatMessage,
+  type CurrencyCode,
+  type LivePhaseStatus,
+  type OptimizationResponse,
+  type StayCandidate,
+  type TimelineStop,
+  type TripSpec,
 } from "@/types/trip";
 
 const INITIAL_PRESETS = presetsRaw as unknown as {
   wayanad: OptimizationResponse;
   goa: OptimizationResponse;
 };
+
+const CURRENCY_OPTIONS: Array<{ code: CurrencyCode; label: string }> = [
+  { code: "INR", label: "₹ INR" },
+  { code: "USD", label: "$ USD" },
+  { code: "EUR", label: "€ EUR" },
+  { code: "GBP", label: "£ GBP" },
+];
 
 function buildInitialWayanadConversation(
   wayanadData: OptimizationResponse
@@ -89,22 +104,88 @@ function buildInitialWayanadConversation(
   ];
 }
 
-async function postPlannerApi(path: string, payload: unknown): Promise<Response> {
+async function fetchPlannerApi(
+  path: string,
+  init: RequestInit
+): Promise<Response> {
   try {
-    const direct = await fetch(`http://127.0.0.1:8000${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    const direct = await fetch(`http://127.0.0.1:8000${path}`, init);
     if (direct.ok) return direct;
   } catch {
     // Fall back to Next.js rewrite route when hosted behind same origin
   }
-  return fetch(path, {
+  return fetch(path, init);
+}
+
+async function consumeSsePost<T>(
+  streamPath: string,
+  fallbackJsonPath: string,
+  payload: unknown,
+  onPhase: (status: LivePhaseStatus) => void
+): Promise<T> {
+  try {
+    const res = await fetchPlannerApi(streamPath, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.ok && res.body) {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalPayload: T | null = null;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop() ?? "";
+
+        for (const block of blocks) {
+          let eventType = "message";
+          let dataStr = "";
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event:")) {
+              eventType = line.slice(6).trim();
+            } else if (line.startsWith("data:")) {
+              dataStr += line.slice(5).trim();
+            }
+          }
+          if (!dataStr) continue;
+          const parsed = JSON.parse(dataStr);
+          if (eventType === "phase") {
+            onPhase(parsed as LivePhaseStatus);
+          } else if (eventType === "complete") {
+            finalPayload = parsed as T;
+          } else if (eventType === "error") {
+            throw new Error(parsed?.message ?? "Stream error");
+          }
+        }
+      }
+
+      if (finalPayload !== null) {
+        return finalPayload;
+      }
+    }
+  } catch {
+    // Fall back cleanly to standard JSON POST
+  }
+
+  const jsonRes = await fetchPlannerApi(fallbackJsonPath, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+  if (!jsonRes.ok) {
+    throw new Error(`HTTP ${jsonRes.status}`);
+  }
+  return (await jsonRes.json()) as T;
 }
 
 type ActiveTab = "itinerary" | "arbitrage" | "telemetry";
@@ -115,6 +196,8 @@ export default function TripSageWorkspacePage() {
   const [optimization, setOptimization] = useState<OptimizationResponse>(
     INITIAL_PRESETS.wayanad
   );
+  const [currency, setCurrency] = useState<CurrencyCode>("INR");
+  const [fxRates, setFxRates] = useState<Record<string, number>>(DEFAULT_FX_RATES);
   const [selectedBlueprintIdx, setSelectedBlueprintIdx] = useState<number>(0);
   const [activeDay, setActiveDay] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>("itinerary");
@@ -123,6 +206,7 @@ export default function TripSageWorkspacePage() {
   const [showParamsDrawer, setShowParamsDrawer] = useState<boolean>(false);
   const [inspectedStay, setInspectedStay] = useState<StayCandidate | null>(null);
   const [isPlanning, setIsPlanning] = useState<boolean>(false);
+  const [livePhase, setLivePhase] = useState<LivePhaseStatus | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     buildInitialWayanadConversation(INITIAL_PRESETS.wayanad)
   );
@@ -131,9 +215,22 @@ export default function TripSageWorkspacePage() {
   const [pinnedScheme, setPinnedScheme] = useState<"light" | "dark" | null>(null);
   const [systemDark, setSystemDark] = useState<boolean>(true);
 
+  // Shareable Trip Permalink + Top-Layer `popover="manual"` Toast Notification state
+  const toastPopoverId = useId();
+  const toastRef = useRef<HTMLDivElement | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const [supportsPopover, setSupportsPopover] = useState<boolean>(true);
+  const [legacyToastOpen, setLegacyToastOpen] = useState<boolean>(false);
+  const [toastText, setToastText] = useState<string>("");
+
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
+    // MANDATORY: Feature detect 'popover' on HTMLElement.prototype
+    if (typeof HTMLElement !== "undefined") {
+      setSupportsPopover("popover" in HTMLElement.prototype);
+    }
+
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     setSystemDark(mq.matches);
     const saved = localStorage.getItem("color-scheme");
@@ -145,21 +242,152 @@ export default function TripSageWorkspacePage() {
       setSystemDark(ev.matches);
     };
     mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
+
+    // Fetch live ECB FX rates in background
+    fetchPlannerApi("/api/fx", { method: "GET" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.rates) {
+          setFxRates(data.rates as Record<string, number>);
+        }
+      })
+      .catch(() => {});
+
+    // Hydrate shareable permalink if `?trip=ts-...` is present in URL
+    const params = new URLSearchParams(window.location.search);
+    const sharedTripId = params.get("trip");
+    if (sharedTripId) {
+      fetchPlannerApi(`/api/trips/${encodeURIComponent(sharedTripId)}`, {
+        method: "GET",
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((savedPayload) => {
+          if (savedPayload?.optimization) {
+            const opt = savedPayload.optimization as OptimizationResponse;
+            setOptimization(opt);
+            if (opt.fx_rates) setFxRates(opt.fx_rates);
+            if (opt.active_currency) setCurrency(opt.active_currency);
+            setSelectedBlueprintIdx(0);
+            setActiveDay(null);
+            setActivePresetKey("custom");
+            if (Array.isArray(savedPayload.messages) && savedPayload.messages.length > 0) {
+              setMessages(
+                savedPayload.messages.map(
+                  (m: { role?: "user" | "assistant"; content?: string; extracted_updates?: string[] }, i: number) => ({
+                    id: `restored-${i}`,
+                    role: m.role === "user" ? "user" : "assistant",
+                    timestamp: "Saved Permalink",
+                    content: String(m.content ?? ""),
+                    extracted_updates: m.extracted_updates,
+                  })
+                )
+              );
+            }
+          }
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      mq.removeEventListener("change", onChange);
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
   }, []);
+
+  const hideShareToast = useCallback(() => {
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+    const el = toastRef.current as (HTMLDivElement & { hidePopover?: () => void }) | null;
+    if (supportsPopover && el && typeof el.hidePopover === "function") {
+      try {
+        el.hidePopover();
+      } catch {
+        // Already hidden
+      }
+    } else {
+      setLegacyToastOpen(false);
+    }
+  }, [supportsPopover]);
+
+  const showShareToast = useCallback(
+    (msg: string) => {
+      setToastText(msg);
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+      const el = toastRef.current as (HTMLDivElement & { showPopover?: () => void }) | null;
+      if (supportsPopover && el && typeof el.showPopover === "function") {
+        try {
+          el.showPopover();
+        } catch {
+          // Already open in top layer
+        }
+      } else {
+        setLegacyToastOpen(true);
+      }
+      toastTimerRef.current = window.setTimeout(() => {
+        hideShareToast();
+      }, 4200);
+    },
+    [hideShareToast, supportsPopover]
+  );
+
+  const handleShareTrip = async () => {
+    let tid = optimization.trip_id ?? null;
+    try {
+      const res = await fetchPlannerApi("/api/trips", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          spec: { ...optimization.trip_spec, currency },
+          optimization: { ...optimization, active_currency: currency, fx_rates: fxRates },
+          messages: messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+            extracted_updates: m.extracted_updates ?? [],
+          })),
+          trip_id: tid,
+        }),
+      });
+      if (res.ok) {
+        const saved = (await res.json()) as { trip_id: string; share_path: string };
+        tid = saved.trip_id;
+        setOptimization((prev) => ({ ...prev, trip_id: tid }));
+      }
+    } catch {
+      // Fallback to client URL hash/query if offline
+    }
+
+    const shareUrl = tid
+      ? `${window.location.origin}/?trip=${tid}`
+      : window.location.href;
+
+    if (tid) {
+      window.history.replaceState(null, "", `/?trip=${tid}`);
+    }
+
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      showShareToast(`Copied shareable permalink: ${shareUrl}`);
+    } catch {
+      showShareToast(`Permalink ready in address bar: /?trip=${tid ?? "ready"}`);
+    }
+  };
 
   const effectiveDark = pinnedScheme ? pinnedScheme === "dark" : systemDark;
 
   const toggleTheme = () => {
     const meta = document.querySelector('meta[name="color-scheme"]');
     if (pinnedScheme !== null) {
-      // Return to system preference
       localStorage.removeItem("color-scheme");
       if (meta) meta.setAttribute("content", "light dark");
       delete document.documentElement.dataset.theme;
       setPinnedScheme(null);
     } else {
-      // Pin exact opposite of current system setting
       const opposite: "light" | "dark" = systemDark ? "light" : "dark";
       localStorage.setItem("color-scheme", opposite);
       if (meta) meta.setAttribute("content", opposite);
@@ -171,12 +399,18 @@ export default function TripSageWorkspacePage() {
   const blueprint =
     optimization.blueprints[selectedBlueprintIdx] ?? optimization.blueprints[0];
 
+  const money = useCallback(
+    (amountInr: number) => formatMoney(amountInr, currency, fxRates),
+    [currency, fxRates]
+  );
+
   const handleSwitchPreset = (key: "wayanad" | "goa") => {
     setActivePresetKey(key);
     const data = key === "wayanad" ? INITIAL_PRESETS.wayanad : INITIAL_PRESETS.goa;
     setOptimization(data);
     setSelectedBlueprintIdx(0);
     setActiveDay(null);
+    window.history.replaceState(null, "", "/");
     if (key === "wayanad") {
       setMessages(buildInitialWayanadConversation(INITIAL_PRESETS.wayanad));
     } else {
@@ -206,34 +440,49 @@ export default function TripSageWorkspacePage() {
 
   const handleUpdateSpec = useCallback(
     async (nextSpec: TripSpec, reasonLabel: string) => {
-      setOptimization((prev) => ({ ...prev, trip_spec: nextSpec }));
+      const specWithCur = { ...nextSpec, currency };
+      setOptimization((prev) => ({ ...prev, trip_spec: specWithCur }));
       setIsPlanning(true);
+      setLivePhase({
+        phase: "Phase 1 · Intent & Constraints",
+        detail: `Syncing ${reasonLabel}...`,
+      });
       try {
-        const res = await postPlannerApi("/api/optimize", nextSpec);
-        if (res.ok) {
-          const updated: OptimizationResponse = await res.json();
-          setOptimization(updated);
-          setSelectedBlueprintIdx(0);
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `sync-${Date.now()}`,
-              role: "assistant",
-              timestamp: "Live Sync",
-              extracted_updates: [reasonLabel],
-              content: `Synced parameter update (${reasonLabel}) -> Re-solved Pareto frontier: ₹${updated.blueprints[0].total_core_landed_inr.toLocaleString(
-                "en-IN"
-              )} core all-in.`,
-            },
-          ]);
+        const updated = await consumeSsePost<OptimizationResponse>(
+          "/api/optimize/stream",
+          "/api/optimize",
+          specWithCur,
+          (ph) => setLivePhase(ph)
+        );
+        setOptimization(updated);
+        if (updated.fx_rates) setFxRates(updated.fx_rates);
+        if (updated.active_currency) setCurrency(updated.active_currency);
+        if (updated.trip_id) {
+          window.history.replaceState(null, "", `/?trip=${updated.trip_id}`);
         }
+        setSelectedBlueprintIdx(0);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `sync-${Date.now()}`,
+            role: "assistant",
+            timestamp: "Live Sync",
+            extracted_updates: [reasonLabel],
+            content: `Synced parameter update (${reasonLabel}) -> Re-solved NSGA-II Pareto frontier: ${formatMoney(
+              updated.blueprints[0].total_core_landed_inr,
+              updated.active_currency ?? currency,
+              updated.fx_rates ?? fxRates
+            )} core all-in.`,
+          },
+        ]);
       } catch {
         // Offline graceful fallback keeps UI interactive
       } finally {
         setIsPlanning(false);
+        setLivePhase(null);
       }
     },
-    []
+    [currency, fxRates]
   );
 
   const handleSendMessage = useCallback(
@@ -246,38 +495,63 @@ export default function TripSageWorkspacePage() {
       };
       setMessages((prev) => [...prev, userMsg]);
       setIsPlanning(true);
+      setLivePhase({
+        phase: "Phase 1 · Intent & Constraints",
+        detail: "Parsing natural-language trip intent & constraints...",
+      });
 
       try {
-        const res = await postPlannerApi("/api/chat", {
-          message: userText,
-          current_spec: optimization.trip_spec,
-          history: messages.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-        });
+        const payload = await consumeSsePost<{
+          updated_spec: TripSpec;
+          assistant_reply: string;
+          extracted_updates: string[];
+          follow_up_questions?: string[];
+          optimization?: OptimizationResponse;
+        }>(
+          "/api/chat/stream",
+          "/api/chat",
+          {
+            message: userText,
+            current_spec: { ...optimization.trip_spec, currency },
+            history: messages.map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
+          },
+          (ph) => setLivePhase(ph)
+        );
 
-        if (res.ok) {
-          const payload = await res.json();
-          if (payload.optimization) {
-            setOptimization(payload.optimization);
-            setSelectedBlueprintIdx(0);
-            setActiveDay(null);
-            setActivePresetKey("custom");
+        if (payload.optimization) {
+          setOptimization(payload.optimization);
+          if (payload.optimization.fx_rates) {
+            setFxRates(payload.optimization.fx_rates);
           }
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `a-${Date.now()}`,
-              role: "assistant",
-              timestamp: "Just now",
-              extracted_updates: payload.extracted_updates,
-              tool_trace: payload.optimization?.tool_trace,
-              follow_up_questions: payload.follow_up_questions,
-              content: payload.assistant_reply,
-            },
-          ]);
+          if (payload.optimization.active_currency) {
+            setCurrency(payload.optimization.active_currency);
+          }
+          if (payload.optimization.trip_id) {
+            window.history.replaceState(
+              null,
+              "",
+              `/?trip=${payload.optimization.trip_id}`
+            );
+          }
+          setSelectedBlueprintIdx(0);
+          setActiveDay(null);
+          setActivePresetKey("custom");
         }
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `a-${Date.now()}`,
+            role: "assistant",
+            timestamp: "Just now",
+            extracted_updates: payload.extracted_updates,
+            tool_trace: payload.optimization?.tool_trace,
+            follow_up_questions: payload.follow_up_questions,
+            content: payload.assistant_reply,
+          },
+        ]);
       } catch {
         setMessages((prev) => [
           ...prev,
@@ -291,9 +565,10 @@ export default function TripSageWorkspacePage() {
         ]);
       } finally {
         setIsPlanning(false);
+        setLivePhase(null);
       }
     },
-    [messages, optimization.trip_spec]
+    [currency, messages, optimization.trip_spec]
   );
 
   // Accessible keyboard arrow navigation for ARIA tabs
@@ -360,7 +635,7 @@ export default function TripSageWorkspacePage() {
         Skip to trip workspace
       </a>
 
-      {/* Top Navigation & Live Arbitrage Scoreboard */}
+      {/* Top Navigation, Global Currency Switcher & Share Permalink */}
       <header className="top-bar">
         <div className="brand-cluster">
           <div className="brand-mark" aria-hidden="true">
@@ -369,36 +644,65 @@ export default function TripSageWorkspacePage() {
           <div>
             <h1 className="brand-title">TripSage</h1>
             <p className="brand-subtitle">
-              Joint Multi-Modal Deal Arbitrage &amp; Itinerary Engine
+              Global Arbitrage, VRPTW &amp; Pareto Itinerary Engine
             </p>
           </div>
         </div>
 
         {/* Scenario Switcher */}
-        <nav aria-label="Example trip scenarios" style={{ display: "flex", gap: "0.45rem", flexWrap: "wrap" }}>
+        <nav aria-label="Example trip scenarios" style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
           <button
             type="button"
             className={`btn ${activePresetKey === "wayanad" ? "btn-active-preset" : ""}`}
             onClick={() => handleSwitchPreset("wayanad")}
           >
-            <Car size={15} aria-hidden="true" />
-            Wayanad Family Road Trip (Dec 21–26)
+            <Car size={14} aria-hidden="true" />
+            Wayanad Road Trip
           </button>
           <button
             type="button"
             className={`btn ${activePresetKey === "goa" ? "btn-active-preset" : ""}`}
             onClick={() => handleSwitchPreset("goa")}
           >
-            <Plane size={15} aria-hidden="true" />
-            Goa Hybrid + The Blue Kite
+            <Plane size={14} aria-hidden="true" />
+            Goa + The Blue Kite
           </button>
         </nav>
 
         <div className="header-actions">
-          <span className="badge badge-emerald" style={{ padding: "0.35rem 0.7rem", fontSize: "0.78rem" }}>
-            <TrendingDown size={14} aria-hidden="true" />
-            Saved ₹{blueprint.total_arbitrage_savings_inr.toLocaleString("en-IN")} via Arbitrage
+          <span className="badge badge-emerald" style={{ padding: "0.32rem 0.65rem", fontSize: "0.76rem" }}>
+            <TrendingDown size={13} aria-hidden="true" />
+            Saved {money(blueprint.total_arbitrage_savings_inr)}
           </span>
+
+          {/* Global + India-First Multi-Currency Switcher */}
+          <div
+            className="currency-pill-group"
+            role="group"
+            aria-label="Display currency"
+          >
+            {CURRENCY_OPTIONS.map((opt) => (
+              <button
+                key={opt.code}
+                type="button"
+                className="currency-pill-btn"
+                aria-pressed={currency === opt.code}
+                onClick={() => setCurrency(opt.code)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            className="btn"
+            onClick={handleShareTrip}
+            aria-label="Save and copy shareable trip link"
+          >
+            <Share2 size={14} aria-hidden="true" />
+            <span>Share Trip</span>
+          </button>
 
           <button
             type="button"
@@ -407,8 +711,8 @@ export default function TripSageWorkspacePage() {
             aria-controls="trip-params-panel"
             onClick={() => setShowParamsDrawer((v) => !v)}
           >
-            <SlidersHorizontal size={15} aria-hidden="true" />
-            {showParamsDrawer ? "Hide Trip Inputs" : "Edit Trip Inputs"}
+            <SlidersHorizontal size={14} aria-hidden="true" />
+            {showParamsDrawer ? "Hide Inputs" : "Edit Inputs"}
           </button>
 
           <button
@@ -422,11 +726,11 @@ export default function TripSageWorkspacePage() {
             }
           >
             {effectiveDark ? (
-              <Sun size={15} aria-hidden="true" />
+              <Sun size={14} aria-hidden="true" />
             ) : (
-              <Moon size={15} aria-hidden="true" />
+              <Moon size={14} aria-hidden="true" />
             )}
-            <span>{pinnedScheme ? `Pinned (${pinnedScheme})` : "System Theme"}</span>
+            <span>{pinnedScheme ? `Pinned (${pinnedScheme})` : "Theme"}</span>
           </button>
         </div>
       </header>
@@ -436,6 +740,7 @@ export default function TripSageWorkspacePage() {
         <ChatPlannerPane
           messages={messages}
           isPlanning={isPlanning}
+          livePhase={livePhase}
           onSendMessage={handleSendMessage}
         />
 
@@ -465,7 +770,7 @@ export default function TripSageWorkspacePage() {
                 </span>
                 <span className="badge badge-gold">
                   {optimization.trip_spec.stay_strategy === "hybrid"
-                    ? "Hybrid Stays (Hotel + 2BHK Villa)"
+                    ? `Hybrid Stays (Hotel + ${optimization.trip_spec.destination_villa_bhk}BHK Villa)`
                     : optimization.trip_spec.stay_strategy === "villas"
                     ? "Villas (Airbnb / The Blue Kite)"
                     : "Hotels & Resorts"}
@@ -473,8 +778,10 @@ export default function TripSageWorkspacePage() {
                 <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600 }}>
                   {optimization.trip_spec.start_date} to {optimization.trip_spec.end_date} ·{" "}
                   {optimization.trip_spec.party.adults} Adults +{" "}
-                  {optimization.trip_spec.party.children} Kids (
-                  {optimization.trip_spec.party.child_ages.join(", ")} yrs)
+                  {optimization.trip_spec.party.children} Kids
+                  {optimization.trip_spec.party.child_ages.length > 0
+                    ? ` (${optimization.trip_spec.party.child_ages.join(", ")} yrs)`
+                    : ""}
                 </span>
               </div>
 
@@ -519,11 +826,11 @@ export default function TripSageWorkspacePage() {
             >
               <div>
                 <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 700 }}>
-                  CORE ALL-IN (STAYS + ROAD{blueprint.flights.length ? " + FLIGHTS" : ""})
+                  CORE ALL-IN ({currency} · STAYS + ROAD{blueprint.flights.length ? " + FLIGHTS" : ""})
                 </div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
                   <span style={{ fontSize: "1.45rem", fontWeight: 900, color: "var(--accent-primary)" }}>
-                    ₹{blueprint.total_core_landed_inr.toLocaleString("en-IN")}
+                    {money(blueprint.total_core_landed_inr)}
                   </span>
                   {blueprint.unoptimized_baseline_inr > blueprint.total_core_landed_inr && (
                     <span
@@ -533,12 +840,12 @@ export default function TripSageWorkspacePage() {
                         color: "var(--text-muted)",
                       }}
                     >
-                      ₹{blueprint.unoptimized_baseline_inr.toLocaleString("en-IN")}
+                      {money(blueprint.unoptimized_baseline_inr)}
                     </span>
                   )}
                 </div>
                 <div style={{ fontSize: "0.73rem", color: "var(--text-muted)" }}>
-                  + ~₹{blueprint.dining_and_activities_est_inr.toLocaleString("en-IN")} est. {blueprint.days.length}-day dining &amp; activity tickets
+                  + ~{money(blueprint.dining_and_activities_est_inr)} est. {blueprint.days.length}-day dining &amp; activity tickets
                 </div>
               </div>
             </div>
@@ -549,6 +856,8 @@ export default function TripSageWorkspacePage() {
             {showParamsDrawer && (
               <TripParametersDrawer
                 spec={optimization.trip_spec}
+                currency={currency}
+                fxRates={fxRates}
                 onUpdateSpec={handleUpdateSpec}
               />
             )}
@@ -559,8 +868,10 @@ export default function TripSageWorkspacePage() {
             <div
               style={{
                 display: "flex",
+                flexWrap: "wrap",
                 alignItems: "center",
                 justifyContent: "space-between",
+                gap: "0.4rem",
                 marginBlockEnd: "0.65rem",
               }}
             >
@@ -576,10 +887,11 @@ export default function TripSageWorkspacePage() {
                 }}
               >
                 <Layers size={17} aria-hidden="true" color="var(--accent-primary)" />
-                Pareto-Optimal Trip Blueprints ({optimization.blueprints.length} Solved)
+                Strict Non-Dominated Pareto Frontier ({optimization.blueprints.length} Solved)
               </h2>
-              <span style={{ fontSize: "0.76rem", color: "var(--text-muted)" }}>
-                Select a bundle to update map, villa base &amp; landed math
+              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                {optimization.pareto_frontier_note ??
+                  "NSGA-II 3D Frontier across Cost × Fatigue × Utility"}
               </span>
             </div>
 
@@ -622,8 +934,8 @@ export default function TripSageWorkspacePage() {
                       >
                         <Award size={12} aria-hidden="true" /> {bp.rank_badge}
                       </span>
-                      <span style={{ fontSize: "0.74rem", fontWeight: 700, color: "var(--gold-accent)" }}>
-                        Deal Score {bp.deal_anomaly_score}
+                      <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--gold-accent)" }}>
+                        Fatigue {bp.fatigue_score} · Score {bp.deal_anomaly_score}
                       </span>
                     </div>
 
@@ -645,10 +957,10 @@ export default function TripSageWorkspacePage() {
                       }}
                     >
                       <strong style={{ fontSize: "1.08rem" }}>
-                        ₹{bp.total_core_landed_inr.toLocaleString("en-IN")}
+                        {money(bp.total_core_landed_inr)}
                       </strong>
                       <span style={{ fontSize: "0.75rem", color: "var(--accent-primary)", fontWeight: 700 }}>
-                        Saves ₹{bp.total_arbitrage_savings_inr.toLocaleString("en-IN")}
+                        Saves {money(bp.total_arbitrage_savings_inr)}
                       </span>
                     </div>
                   </button>
@@ -657,10 +969,13 @@ export default function TripSageWorkspacePage() {
             </div>
           </section>
 
-          {/* Synchronized Interactive Route & Corridor Map */}
+          {/* Synchronized Interactive Slippy Web Mercator Route & Corridor Map */}
           <RouteCorridorMap
             blueprint={blueprint}
             activeDay={activeDay}
+            effectiveDark={effectiveDark}
+            currency={currency}
+            fxRates={fxRates}
             onSelectDay={setActiveDay}
             onInspectStay={setInspectedStay}
           />
@@ -688,7 +1003,7 @@ export default function TripSageWorkspacePage() {
               }}
             >
               <Flame size={15} aria-hidden="true" />
-              Algorithmic Arbitrage &amp; Timing Insights Caught on This Route
+              Algorithmic Arbitrage &amp; VRPTW Timing Insights Caught on This Route
             </div>
             <ul
               role="list"
@@ -708,7 +1023,7 @@ export default function TripSageWorkspacePage() {
             </ul>
           </div>
 
-          {/* Primary Detail Tabs: Itinerary | Cross-Channel Arbitrage | SUV & Gate Telemetry */}
+          {/* Primary Detail Tabs: Itinerary | Cross-Channel Arbitrage | Road, Tolls & Gates */}
           <div>
             <div
               role="tablist"
@@ -724,7 +1039,7 @@ export default function TripSageWorkspacePage() {
             >
               {(
                 [
-                  ["itinerary", `${blueprint.days.length}-Day Curated Itinerary`],
+                  ["itinerary", `${blueprint.days.length}-Day VRPTW Itinerary`],
                   ["arbitrage", `Cross-Channel Stay Arbitrage (${blueprint.stays.length} Stays)`],
                   ["telemetry", `${optimization.trip_spec.vehicle_name.split("(")[0].trim()} Road, Tolls & Gates`],
                 ] as const
@@ -752,14 +1067,13 @@ export default function TripSageWorkspacePage() {
               })}
             </div>
 
-            {/* TAB PANEL 1: DAY-BY-DAY CURATED FAMILY ITINERARY */}
+            {/* TAB PANEL 1: DAY-BY-DAY VRPTW ITINERARY */}
             <div
               role="tabpanel"
               id="panel-itinerary"
               aria-labelledby="tab-itinerary"
               hidden={activeTab !== "itinerary"}
             >
-              {/* Semantic <search> Landmark for Filtering Stops */}
               <search
                 style={{
                   display: "flex",
@@ -799,8 +1113,8 @@ export default function TripSageWorkspacePage() {
                   {(
                     [
                       ["all", "All Stops"],
-                      ["climb", "Moderate Climbs & Nature"],
-                      ["dining", "Veg + Non-Veg Dining"],
+                      ["climb", "Climbs & Nature"],
+                      ["dining", "Regional Dining"],
                       ["stay_drive", "Drives & Stays"],
                     ] as const
                   ).map(([fKey, fLabel]) => (
@@ -939,7 +1253,7 @@ export default function TripSageWorkspacePage() {
                                   )}
                                   {st.kid_note && (
                                     <span className="badge badge-emerald">
-                                      Kids (8 &amp; 10): {st.kid_note}
+                                      Family Fit: {st.kid_note}
                                     </span>
                                   )}
                                   {st.insider_tip && (
@@ -965,7 +1279,6 @@ export default function TripSageWorkspacePage() {
               aria-labelledby="tab-arbitrage"
               hidden={activeTab !== "arbitrage"}
             >
-              {/* Platform Adapter Scan Coverage Strip */}
               <div
                 style={{
                   display: "grid",
@@ -1007,7 +1320,6 @@ export default function TripSageWorkspacePage() {
                 ))}
               </div>
 
-              {/* Flights Section when Flight/Hybrid Mode is Active */}
               {blueprint.flights.length > 0 && (
                 <div style={{ marginBlockEnd: "1.1rem" }}>
                   <h3 style={{ fontSize: "0.95rem", fontWeight: 800, marginBlockEnd: "0.5rem" }}>
@@ -1028,7 +1340,22 @@ export default function TripSageWorkspacePage() {
                       }}
                     >
                       <div>
-                        <span className="badge badge-gold">{flt.carrier}</span>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+                          <span className="badge badge-gold">{flt.carrier}</span>
+                          <span
+                            className={`badge ${
+                              flt.price_provenance === "live_verified"
+                                ? "badge-emerald"
+                                : "badge-route"
+                            }`}
+                          >
+                            <Info size={11} aria-hidden="true" />{" "}
+                            {flt.provenance_label ??
+                              (flt.price_provenance === "live_verified"
+                                ? "Live Google Flights Quote"
+                                : "Distance Airfare Benchmark")}
+                          </span>
+                        </div>
                         <div style={{ fontWeight: 800, fontSize: "0.96rem", marginBlockStart: "0.3rem" }}>
                           {flt.route_label} ({flt.flight_numbers})
                         </div>
@@ -1038,10 +1365,10 @@ export default function TripSageWorkspacePage() {
                       </div>
                       <div style={{ textAlign: "end" }}>
                         <div style={{ fontSize: "1.2rem", fontWeight: 900, color: "var(--accent-primary)" }}>
-                          ₹{flt.landed_family_total_inr.toLocaleString("en-IN")}
+                          {money(flt.landed_family_total_inr)}
                         </div>
                         <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                          4 Seats + Luggage · Saves ₹{flt.savings_inr.toLocaleString("en-IN")}
+                          All Travelers · Saves {money(flt.savings_inr)}
                         </div>
                       </div>
                     </div>
@@ -1049,108 +1376,132 @@ export default function TripSageWorkspacePage() {
                 </div>
               )}
 
-              {/* Size-Aware Container Query Stay Cards */}
               <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                {blueprint.stays.map((stay) => (
-                  <div key={stay.id} className="card-container">
-                    <article className="stay-arbitrage-card">
-                      <img
-                        src={stay.image_url}
-                        alt={`${stay.name} in ${stay.city}`}
-                        width={450}
-                        height={300}
-                        loading="lazy"
-                        className="stay-card-media"
-                      />
+                {blueprint.stays.map((stay) => {
+                  const prov = stay.price_provenance ?? "estimated_benchmark";
+                  const shortProv =
+                    prov === "live_verified"
+                      ? "Live Verified Quote"
+                      : prov === "live_scraped"
+                      ? "Live Scraped Tariff"
+                      : "Benchmark Estimate";
 
-                      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "0.45rem" }}>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", alignItems: "center" }}>
-                          <span className="badge badge-emerald">
-                            <Sparkles size={12} aria-hidden="true" /> {stay.anomaly_badge}
-                          </span>
-                          <span className="badge badge-route">
-                            {stay.check_in} to {stay.check_out} ({stay.nights}N)
-                          </span>
-                          <span style={{ fontSize: "0.78rem", fontWeight: 700, marginInlineStart: "auto" }}>
-                            ★ {stay.rating} ({stay.review_count} reviews)
-                          </span>
-                        </div>
+                  return (
+                    <div key={stay.id} className="card-container">
+                      <article className="stay-arbitrage-card">
+                        <img
+                          src={stay.image_url}
+                          alt={`${stay.name} in ${stay.city}`}
+                          width={450}
+                          height={300}
+                          loading="lazy"
+                          className="stay-card-media"
+                        />
 
-                        <h3 style={{ margin: 0, fontSize: "1.08rem", fontWeight: 800 }}>
-                          {stay.name}
-                        </h3>
-                        <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                          {stay.subtitle} · {stay.bedrooms_label}
-                        </div>
-
-                        <ul
-                          role="list"
-                          style={{
-                            margin: "0.15rem 0",
-                            paddingInlineStart: "1.1rem",
-                            fontSize: "0.8rem",
-                            color: "var(--text-secondary)",
-                          }}
-                        >
-                          {stay.highlights.map((h, i) => (
-                            <li key={i}>{h}</li>
-                          ))}
-                        </ul>
-
-                        <div
-                          style={{
-                            marginBlockStart: "auto",
-                            paddingBlockStart: "0.6rem",
-                            borderBlockStart: "1px solid var(--border-subtle)",
-                            display: "flex",
-                            flexWrap: "wrap",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: "0.75rem",
-                          }}
-                        >
-                          <div>
-                            <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 700 }}>
-                              WINNING CHANNEL: {stay.best_channel.toUpperCase()}
-                            </div>
-                            <div style={{ display: "flex", alignItems: "baseline", gap: "0.45rem" }}>
-                              <strong style={{ fontSize: "1.2rem", color: "var(--accent-primary)" }}>
-                                ₹{stay.best_landed_inr.toLocaleString("en-IN")}
-                              </strong>
-                              <span style={{ fontSize: "0.77rem", color: "var(--text-muted)" }}>
-                                (₹{Math.round(stay.best_landed_inr / stay.nights).toLocaleString("en-IN")}/night landed)
-                              </span>
-                            </div>
+                        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "0.45rem" }}>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", alignItems: "center" }}>
+                            <span className="badge badge-emerald">
+                              <Sparkles size={12} aria-hidden="true" />{" "}
+                              {stay.savings_inr > 0
+                                ? `Saves ${money(stay.savings_inr)} via ${stay.best_channel}`
+                                : stay.anomaly_badge}
+                            </span>
+                            <span
+                              className={`badge ${
+                                prov === "live_verified"
+                                  ? "badge-emerald"
+                                  : prov === "live_scraped"
+                                  ? "badge-route"
+                                  : "badge-gold"
+                              }`}
+                              title={stay.provenance_label}
+                            >
+                              <Info size={11} aria-hidden="true" /> {shortProv}
+                            </span>
+                            <span className="badge badge-route">
+                              {stay.check_in} to {stay.check_out} ({stay.nights}N)
+                            </span>
+                            <span style={{ fontSize: "0.78rem", fontWeight: 700, marginInlineStart: "auto" }}>
+                              ★ {stay.rating} ({stay.review_count} reviews)
+                            </span>
                           </div>
 
-                          <div style={{ display: "flex", gap: "0.5rem" }}>
-                            <button
-                              type="button"
-                              className="btn btn-primary"
-                              onClick={() => setInspectedStay(stay)}
-                            >
-                              <CheckCircle2 size={15} aria-hidden="true" />
-                              {`Inspect ${stay.offers.length}-Channel Fee Math`}
-                            </button>
-                            <a
-                              href={stay.offers[0]?.booking_url ?? "#"}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="btn"
-                              style={{ textDecoration: "none" }}
-                            >
-                              Portal <ExternalLink size={14} aria-hidden="true" />
-                            </a>
+                          <h3 style={{ margin: 0, fontSize: "1.08rem", fontWeight: 800 }}>
+                            {stay.name}
+                          </h3>
+                          <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                            {stay.subtitle} · {stay.bedrooms_label}
+                          </div>
+
+                          <ul
+                            role="list"
+                            style={{
+                              margin: "0.15rem 0",
+                              paddingInlineStart: "1.1rem",
+                              fontSize: "0.8rem",
+                              color: "var(--text-secondary)",
+                            }}
+                          >
+                            {stay.highlights.map((h, i) => (
+                              <li key={i}>{h}</li>
+                            ))}
+                          </ul>
+
+                          <div
+                            style={{
+                              marginBlockStart: "auto",
+                              paddingBlockStart: "0.6rem",
+                              borderBlockStart: "1px solid var(--border-subtle)",
+                              display: "flex",
+                              flexWrap: "wrap",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: "0.75rem",
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 700 }}>
+                                WINNING CHANNEL: {stay.best_channel.toUpperCase()}
+                              </div>
+                              <div style={{ display: "flex", alignItems: "baseline", gap: "0.45rem" }}>
+                                <strong style={{ fontSize: "1.2rem", color: "var(--accent-primary)" }}>
+                                  {money(stay.best_landed_inr)}
+                                </strong>
+                                <span style={{ fontSize: "0.77rem", color: "var(--text-muted)" }}>
+                                  ({money(Math.round(stay.best_landed_inr / stay.nights))}/night landed)
+                                </span>
+                              </div>
+                            </div>
+
+                            <div style={{ display: "flex", gap: "0.5rem" }}>
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                onClick={() => setInspectedStay(stay)}
+                              >
+                                <CheckCircle2 size={15} aria-hidden="true" />
+                                {`Inspect ${stay.offers.length}-Channel Fee Math`}
+                              </button>
+                              <a
+                                href={stay.offers[0]?.booking_url ?? "#"}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="btn"
+                                style={{ textDecoration: "none" }}
+                              >
+                                Portal <ExternalLink size={14} aria-hidden="true" />
+                              </a>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </article>
-                  </div>
-                ))}
+                      </article>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
-            {/* TAB PANEL 3: SUV TELEMETRY, FUEL, FASTAG & BANDIPUR GATE RULES */}
+            {/* TAB PANEL 3: VEHICLE TELEMETRY, FUEL, TOLLS & CHECKPOST RULES */}
             <div
               role="tabpanel"
               id="panel-telemetry"
@@ -1174,9 +1525,9 @@ export default function TripSageWorkspacePage() {
                 </div>
 
                 <div style={{ padding: "0.9rem", borderRadius: "0.8rem", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}>
-                  <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", fontWeight: 700 }}>DIESEL ESTIMATE</div>
+                  <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", fontWeight: 700 }}>FUEL ESTIMATE ({currency})</div>
                   <div style={{ fontSize: "1.15rem", fontWeight: 800, marginBlockStart: "0.2rem" }}>
-                    ₹{blueprint.road.fuel_cost_inr.toLocaleString("en-IN")}
+                    {money(blueprint.road.fuel_cost_inr)}
                   </div>
                   <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
                     <Fuel size={12} aria-hidden="true" style={{ display: "inline", marginInlineEnd: 4 }} />
@@ -1185,9 +1536,9 @@ export default function TripSageWorkspacePage() {
                 </div>
 
                 <div style={{ padding: "0.9rem", borderRadius: "0.8rem", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}>
-                  <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", fontWeight: 700 }}>FASTAG &amp; FOREST ENTRY</div>
+                  <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", fontWeight: 700 }}>HIGHWAY TOLLS &amp; ENTRY</div>
                   <div style={{ fontSize: "1.15rem", fontWeight: 800, marginBlockStart: "0.2rem" }}>
-                    ₹{blueprint.road.fastag_and_forest_tolls_inr.toLocaleString("en-IN")}
+                    {money(blueprint.road.fastag_and_forest_tolls_inr)}
                   </div>
                   <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
                     {blueprint.road.segments[0]?.highway_label ?? "Highway & Corridor Plazas"}
@@ -1198,15 +1549,15 @@ export default function TripSageWorkspacePage() {
               <div className="table-scroll">
                 <table className="rate-table">
                   <caption>
-                    Corridor-by-Corridor Driving, FASTag Toll &amp; Forest Checkpost Verification
+                    Corridor-by-Corridor Driving, Toll &amp; Checkpost Verification ({currency})
                   </caption>
                   <thead>
                     <tr>
                       <th scope="col">Day</th>
                       <th scope="col">Leg &amp; Highway</th>
                       <th scope="col">Distance / Time</th>
-                      <th scope="col">FASTag + Fuel</th>
-                      <th scope="col">Gate &amp; Gradient Advisory</th>
+                      <th scope="col">Toll + Fuel</th>
+                      <th scope="col">Gate &amp; VRPTW Advisory</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1228,9 +1579,9 @@ export default function TripSageWorkspacePage() {
                           {seg.duration_mins % 60}m
                         </td>
                         <td>
-                          ₹{(seg.fastag_toll_inr + seg.fuel_estimate_inr).toLocaleString("en-IN")}
+                          {money(seg.fastag_toll_inr + seg.fuel_estimate_inr)}
                           <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
-                            Toll ₹{seg.fastag_toll_inr} · Fuel ₹{seg.fuel_estimate_inr}
+                            Toll {money(seg.fastag_toll_inr)} · Fuel {money(seg.fuel_estimate_inr)}
                           </div>
                         </td>
                         <td style={{ fontSize: "0.79rem" }}>
@@ -1255,9 +1606,44 @@ export default function TripSageWorkspacePage() {
         </main>
       </div>
 
+      {/* Top-Layer Persistent Toast Notification (`popover="manual"`) */}
+      <div className="toast-stack" role="region" aria-label="Notifications">
+        <div
+          id={toastPopoverId}
+          ref={toastRef}
+          role="status"
+          aria-live="polite"
+          className="share-toast"
+          data-legacy-open={!supportsPopover ? String(legacyToastOpen) : undefined}
+          {...(supportsPopover ? ({ popover: "manual" } as Record<string, string>) : {})}
+        >
+          <Link2 size={16} aria-hidden="true" color="var(--accent-primary)" />
+          <span style={{ fontSize: "0.81rem", fontWeight: 600, flex: 1, wordBreak: "break-all" }}>
+            {toastText}
+          </span>
+          <button
+            type="button"
+            className="btn"
+            aria-label="Close notification"
+            style={{ minBlockSize: "1.9rem", padding: "0.2rem 0.45rem" }}
+            onClick={hideShareToast}
+            {...(supportsPopover
+              ? ({
+                  popovertarget: toastPopoverId,
+                  popovertargetaction: "hide",
+                } as Record<string, string>)
+              : {})}
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+
       {/* Native Top-Layer Light-Dismiss Deal Breakdown Modal */}
       <DealArbitrageDialog
         stay={inspectedStay}
+        currency={currency}
+        fxRates={fxRates}
         onClose={() => setInspectedStay(null)}
       />
     </div>
