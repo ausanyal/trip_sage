@@ -49,6 +49,7 @@ Rules:
 8. `currency` MUST be one of: `"INR"`, `"USD"`, `"EUR"`, `"GBP"`, or `null`.
 9. Dates (`start_date`, `end_date`, `check_in`, `check_out`) MUST be ISO `YYYY-MM-DD`.
 10. If the user explicitly asks you to ask clarifying questions OR starts a new trip with missing specifics (e.g., car model, exact room setup, BHK/budget ceiling, kid activity preferences, departure time), set `needs_clarification` to `true` and return 3-5 tailored travel-agent questions in `follow_up_questions`.
+11. If the user asks to see MORE, SIMILAR, OTHER, or ALTERNATIVE places/villas/hotels to stay (so they have more options to choose from), increase `stay_options_limit` from `3` to `6` (or if already `>= 6`, increment `stay_pool_offset` by `3` to load a fresh batch of properties) without resetting `pinned_stays`.
 """
 
 
@@ -390,9 +391,11 @@ def _deterministic_nlp_extract(
             if cand_orig.lower() != spec.origin.lower():
                 spec.origin = cand_orig
                 updates.append(f"Origin -> {cand_orig}")
-            if cand_dest.lower() != spec.destination.lower():
+            if cand_dest.lower().split(",")[0].strip() != spec.destination.lower().split(",")[0].strip():
                 spec.destination = cand_dest
                 spec.pinned_stays = []
+                spec.stay_options_limit = 3
+                spec.stay_pool_offset = 0
                 spec.currency = None
                 dest_switched = True
                 updates.append(f"Destination -> {cand_dest}")
@@ -404,9 +407,14 @@ def _deterministic_nlp_extract(
         )
         if to_match:
             cand_dest = _clean_place_phrase(to_match.group(1))
-            if len(cand_dest) >= 3 and cand_dest.lower() != spec.destination.lower():
+            if (
+                len(cand_dest) >= 3
+                and cand_dest.lower().split(",")[0].strip() != spec.destination.lower().split(",")[0].strip()
+            ):
                 spec.destination = cand_dest
                 spec.pinned_stays = []
+                spec.stay_options_limit = 3
+                spec.stay_pool_offset = 0
                 spec.currency = None
                 dest_switched = True
                 updates.append(f"Destination -> {cand_dest}")
@@ -634,8 +642,59 @@ def _deterministic_nlp_extract(
         spec.activities.dietary = "both"
         updates.append("Dietary -> Veg + Non-Veg")
 
+    # 12. Expand or Rotate Destination Stay Options ("search more similar places to stay", "more options to choose from")
+    wants_more_stays = bool(
+        re.search(
+            r"\b(?:more\s+(?:similar\s+)?(?:places|stays|options|villas|hotels|resorts|airbnbs|properties|homes)|"
+            r"similar\s+(?:places|stays|villas|hotels|resorts|options|properties)|"
+            r"(?:other|another|different|additional|extra|alternative)\s+(?:places|stays|options|villas|hotels|resorts|airbnbs|choices|batch)|"
+            r"more\s+options\s+to\s+choose)\b",
+            lower,
+        )
+    )
+    if wants_more_stays:
+        if (spec.stay_options_limit or 3) < 6:
+            spec.stay_options_limit = 6
+            updates.append("Stay Pool -> Expanded to 6 Comparable Stays")
+        else:
+            spec.stay_pool_offset = (spec.stay_pool_offset or 0) + 3
+            spec.stay_options_limit = 6
+            updates.append(f"Stay Pool -> Next Comparable Batch (Offset +{spec.stay_pool_offset})")
+
     questions = _build_contextual_questions(msg, spec, dest_switched)
     return spec, updates, questions
+
+
+def _format_stay_comparison_shortlist(opt: Any) -> str:
+    dest_short = opt.trip_spec.destination.split(",")[0].strip()
+    outbound_cnt = sum(
+        1
+        for p in opt.trip_spec.pinned_stays
+        if p.check_in < opt.trip_spec.end_date and "Outbound" in p.leg_label
+    )
+    lines: List[str] = []
+    for idx_bp, bp in enumerate(opt.blueprints, start=1):
+        d_stay = next(
+            (s for s in bp.stays if s.city.lower() == dest_short.lower()),
+            bp.stays[min(outbound_cnt, max(0, len(bp.stays) - 1))],
+        )
+        per_night = format_amount_from_inr(
+            d_stay.best_landed_inr // max(1, d_stay.nights),
+            opt.active_currency,
+            opt.fx_rates,
+        )
+        trip_tot = format_amount_from_inr(
+            bp.total_core_landed_inr, opt.active_currency, opt.fx_rates
+        )
+        sav_str = (
+            f" · Saves {format_amount_from_inr(d_stay.savings_inr, opt.active_currency, opt.fx_rates)}"
+            if d_stay.savings_inr > 0
+            else ""
+        )
+        lines.append(
+            f"{idx_bp}. **{d_stay.name}** ({d_stay.best_channel}) — **{per_night}/night** landed · Full trip **{trip_tot}**{sav_str}"
+        )
+    return "\n".join(lines)
 
 
 async def process_chat_turn(
@@ -677,12 +736,27 @@ async def process_chat_turn(
         top_bp = opt.blueprints[0]
         fmt_core = format_amount_from_inr(top_bp.total_core_landed_inr, opt.active_currency, opt.fx_rates)
         fmt_save = format_amount_from_inr(top_bp.total_arbitrage_savings_inr, opt.active_currency, opt.fx_rates)
-        reply = (
-            f"{preface + ' ' if preface else ''}"
-            f"Solved **{len(opt.blueprints)} non-dominated Pareto blueprints** for **{opt.trip_spec.origin} -> {opt.trip_spec.destination}** — "
-            f"Pareto Knee **{top_bp.name}** lands at **{fmt_core}** core all-in "
-            f"(saving **{fmt_save}** via cross-channel arbitrage)."
+        expanded_pool = (
+            updated_spec.stay_options_limit > req.current_spec.stay_options_limit
+            or updated_spec.stay_pool_offset != req.current_spec.stay_pool_offset
         )
+        if expanded_pool:
+            shortlist = _format_stay_comparison_shortlist(opt)
+            dest_short = opt.trip_spec.destination.split(",")[0].strip()
+            reply = (
+                f"{preface + ' ' if preface else ''}"
+                f"Expanded your **{dest_short}** stay search to **{len(opt.blueprints)} comparable options** "
+                f"(all priced all-in and solved with your route):\n\n{shortlist}\n\n"
+                f"All **{len(opt.blueprints)} Pareto cards** are now live on the right — click any card to switch your itinerary & map, "
+                f"or ask *\"show another batch of stays\"* to scan deeper!"
+            )
+        else:
+            reply = (
+                f"{preface + ' ' if preface else ''}"
+                f"Solved **{len(opt.blueprints)} non-dominated Pareto blueprints** for **{opt.trip_spec.origin} -> {opt.trip_spec.destination}** — "
+                f"Pareto Knee **{top_bp.name}** lands at **{fmt_core}** core all-in "
+                f"(saving **{fmt_save}** via cross-channel arbitrage)."
+            )
         if questions:
             reply += "\n\nTo fine-tune this draft itinerary, let me know your preferences on:"
         transcript = [m.model_dump() for m in req.history] + [
@@ -716,7 +790,22 @@ async def process_chat_turn(
         uniq_stops = list(dict.fromkeys(f"{p.property_name} ({p.check_in})" for p in opt.trip_spec.pinned_stays))
         transit_summary = f" Anchored transit stopovers at **{', '.join(uniq_stops)}**."
 
-    if questions:
+    expanded_pool = (
+        updated_spec.stay_options_limit > req.current_spec.stay_options_limit
+        or updated_spec.stay_pool_offset != req.current_spec.stay_pool_offset
+    )
+
+    if expanded_pool:
+        dest_short = opt.trip_spec.destination.split(",")[0].strip()
+        shortlist = _format_stay_comparison_shortlist(opt)
+        reply = (
+            f"Expanded your **{dest_short}** stay search to **{len(opt.blueprints)} comparable options** "
+            f"(each solved end-to-end with your route{',' + transit_summary.rstrip('.') if transit_summary else ''}):\n\n"
+            f"{shortlist}\n\n"
+            f"All **{len(opt.blueprints)} Pareto cards** are now live on the right — click any card (or open **Cross-Channel Stay Arbitrage**) "
+            f"to switch your itinerary & map to that stay, or ask *\"show more stay options\"* again to load another fresh batch!"
+        )
+    elif questions:
         reply = (
             f"Mapped an initial **{len(opt.blueprints)}-blueprint Pareto & VRPTW plan** for "
             f"**{opt.trip_spec.origin} -> {opt.trip_spec.destination}** (**{fmt_core}** core all-in, saving **{fmt_save}** across channels)."

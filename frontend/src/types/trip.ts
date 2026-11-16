@@ -80,6 +80,8 @@ export interface TripSpec {
   destination_villa_bhk: number;
   nightly_budget_min_inr: number;
   nightly_budget_max_inr: number;
+  stay_options_limit?: number;
+  stay_pool_offset?: number;
   currency?: CurrencyCode | null;
   party: TravelParty;
   pinned_stays: PinnedStaySpec[];

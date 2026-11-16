@@ -314,6 +314,28 @@ class TestTripSageV3Engine(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2", turn2_spec.departure_time_pref)
         self.assertEqual(turn2_questions, [])
 
+        # Turn 3: User asks to search more similar places to stay so they have more options to choose from
+        more_stays_q = (
+            "can you help search more similar places to stay in wayanad like the one you just found.. "
+            "so i have more options to choose from ??"
+        )
+        turn3_spec, turn3_updates, turn3_questions = _deterministic_nlp_extract(
+            ChatTurnRequest(message=more_stays_q, current_spec=turn2_spec)
+        )
+        self.assertEqual(turn3_spec.destination, "Wayanad, Kerala")
+        self.assertEqual(len(turn3_spec.pinned_stays), 2)
+        self.assertEqual(turn3_spec.stay_options_limit, 6)
+        self.assertEqual(turn3_spec.stay_pool_offset, 0)
+        self.assertTrue(any("Stay Pool" in u for u in turn3_updates))
+        self.assertEqual(turn3_questions, [])
+
+        # Asking a second time advances stay_pool_offset to load a fresh batch
+        turn4_spec, _, _ = _deterministic_nlp_extract(
+            ChatTurnRequest(message="show me another batch of different options", current_spec=turn3_spec)
+        )
+        self.assertEqual(turn4_spec.stay_options_limit, 6)
+        self.assertEqual(turn4_spec.stay_pool_offset, 3)
+
     async def test_serpapi_live_hotel_adapter_parsing(self) -> None:
         os.environ["SERPAPI_API_KEY"] = "mock-serp-key"
         fake_serp_payload = {

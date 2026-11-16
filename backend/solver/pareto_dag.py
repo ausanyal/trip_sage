@@ -746,7 +746,9 @@ async def solve_trip_pareto(
             )
         )
 
-    blueprints = strict_pareto_rank_and_filter(raw_blueprints)
+    blueprints = strict_pareto_rank_and_filter(
+        raw_blueprints, max_results=max(3, min(8, spec.stay_options_limit))
+    )
     front1_count = sum(1 for b in blueprints if b.pareto_front_rank == 1)
 
     t_dag_ms = max(14, int(round((time.perf_counter() - t_dag_start) * 1000)))

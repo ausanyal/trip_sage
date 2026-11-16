@@ -49,6 +49,8 @@ class TripSpec(BaseModel):
     destination_villa_bhk: int = 2
     nightly_budget_min_inr: int = 12000
     nightly_budget_max_inr: int = 20000
+    stay_options_limit: int = 3
+    stay_pool_offset: int = 0
     currency: Optional[CurrencyCode] = None
     party: TravelParty = Field(default_factory=TravelParty)
     pinned_stays: List[PinnedStaySpec] = Field(default_factory=list)

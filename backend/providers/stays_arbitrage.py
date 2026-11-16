@@ -789,6 +789,8 @@ async def discover_destination_stays(
     """Discovers, deduplicates, and prices top destination stays across SerpApi Live, Blue Kite, StayVista, Airbnb & Hotels."""
     bk_entities, bk_coverage = await scan_bluekite_live(dest, spec.destination_villa_bhk)
     wants_villas = spec.stay_strategy in ("villas", "hybrid")
+    desired = max(4, min(9, int(getattr(spec, "stay_options_limit", 3) or 3) + 1))
+    pool_offset = max(0, int(getattr(spec, "stay_pool_offset", 0) or 0))
 
     # 1. Primary path when SERPAPI_API_KEY is configured: real-time multi-OTA checkout quotes
     if has_serpapi_key():
@@ -800,7 +802,7 @@ async def discover_destination_stays(
             bhk=spec.destination_villa_bhk,
             vacation_rentals=wants_villas,
             vehicle_name=spec.vehicle_name,
-            limit=4,
+            limit=max(desired, pool_offset + desired),
         )
         if serp_stays:
             # Merge any matched direct Blue Kite villa onto the candidate pool so direct-portal arbitrage is preserved
@@ -820,6 +822,10 @@ async def discover_destination_stays(
                 )
                 serp_stays.insert(0, bk_cand)
 
+            if pool_offset > 0 and len(serp_stays) > 1:
+                off = pool_offset % len(serp_stays)
+                serp_stays = serp_stays[off:] + serp_stays[:off]
+
             coverage_live = [
                 PlatformCoverageNote(
                     platform="Google Hotels & Vacation Rentals (SerpApi Live)",
@@ -829,21 +835,22 @@ async def discover_destination_stays(
                 ),
                 bk_coverage,
             ]
-            return serp_stays[:4], coverage_live
+            return serp_stays[:desired], coverage_live
 
     # 2. Zero-key transparent benchmark path: real OSM properties + live Blue Kite scrape + statutory tax/fee model
-    osm_entities = await fetch_osm_hospitality(dest, radius_m=20000)
+    osm_entities = await fetch_osm_hospitality(dest, radius_m=22000)
     combined_raw: List[RawStayEntity] = []
+    pool_target = max(14, desired + pool_offset + 2)
 
     if wants_villas:
         combined_raw.extend(bk_entities)
         osm_villas = [e for e in osm_entities if e.category in ("villa", "airbnb")]
-        combined_raw.extend(osm_villas[:4])
+        combined_raw.extend(osm_villas[:pool_target])
 
-        # If OSM tagged real local resorts/lodges as 'hotel', include top properties as private suite/villa options
-        if len(combined_raw) < 4:
+        # If OSM tagged real local resorts/lodges as 'hotel', include properties as private suite/villa options
+        if len(combined_raw) < pool_target:
             for osm_h in osm_entities:
-                if len(combined_raw) >= 4:
+                if len(combined_raw) >= pool_target:
                     break
                 if osm_h.category == "hotel":
                     combined_raw.append(
@@ -866,16 +873,22 @@ async def discover_destination_stays(
                 (f"StayVista Crest {unit_lbl} Pool Villa — {dest.short_name}", "villa", 0.012, -0.011),
                 (f'"{dest.short_name} Ridge" Superhost {unit_lbl} Chalet', "airbnb", -0.014, 0.015),
                 (f"SaffronStays Sanctuary {unit_lbl} Estate — {dest.short_name}", "villa", 0.007, 0.018),
+                (f"StayVista Canopy {unit_lbl} Plantation Home — {dest.short_name}", "villa", -0.009, -0.016),
+                (f'"{dest.short_name} Brookside" Superhost {unit_lbl} Villa', "airbnb", 0.017, 0.008),
+                (f"SaffronStays Mist {unit_lbl} Manor — {dest.short_name}", "villa", -0.018, 0.006),
             ]
             if is_in
             else [
                 (f"Plum Guide Signature {unit_lbl} Villa — {dest.short_name}", "villa", 0.012, -0.011),
                 (f'"{dest.short_name} Vista" Superhost {unit_lbl} Residence', "airbnb", -0.014, 0.015),
                 (f"Vrbo Premier {unit_lbl} Estate — {dest.short_name}", "villa", 0.007, 0.018),
+                (f"Plum Guide Terrace {unit_lbl} Retreat — {dest.short_name}", "villa", -0.009, -0.016),
+                (f'"{dest.short_name} Canyon" Superhost {unit_lbl} Home', "airbnb", 0.017, 0.008),
+                (f"Vrbo Luxe {unit_lbl} Chalet — {dest.short_name}", "villa", -0.018, 0.006),
             ]
         )
         idx_t = 0
-        while len(combined_raw) < 4 and idx_t < len(fallback_templates):
+        while len(combined_raw) < desired and idx_t < len(fallback_templates):
             nm, cat, dlat, dlng = fallback_templates[idx_t]
             combined_raw.append(
                 RawStayEntity(
@@ -884,22 +897,25 @@ async def discover_destination_stays(
                     lat=dest.lat + dlat,
                     lng=dest.lng + dlng,
                     micro_region=f"{dest.short_name} Scenic Estate Belt",
-                    stars_or_tier=4.88 - idx_t * 0.03,
+                    stars_or_tier=4.88 - idx_t * 0.02,
                 )
             )
             idx_t += 1
     else:
         osm_hotels = [e for e in osm_entities if e.category == "hotel"]
-        combined_raw.extend(osm_hotels[:4])
-        if len(combined_raw) < 4:
-            combined_raw.extend([e for e in osm_entities if e.category != "hotel"][: 4 - len(combined_raw)])
+        combined_raw.extend(osm_hotels[:pool_target])
+        if len(combined_raw) < pool_target:
+            combined_raw.extend([e for e in osm_entities if e.category != "hotel"][: pool_target - len(combined_raw)])
         idx_h = 0
         fallback_hotels = [
             (f"Grand Heritage Resort & Spa {dest.short_name}", 0.008, -0.007),
             (f"The Canopy Retreat {dest.short_name}", -0.011, 0.012),
             (f"Courtyard Pavilion {dest.short_name}", 0.014, 0.009),
+            (f"Taj Gateway Vista {dest.short_name}", -0.015, -0.011),
+            (f"Regency Highland Resort {dest.short_name}", 0.018, -0.005),
+            (f"Botanica Boutique Hotel {dest.short_name}", -0.006, 0.019),
         ]
-        while len(combined_raw) < 4 and idx_h < len(fallback_hotels):
+        while len(combined_raw) < desired and idx_h < len(fallback_hotels):
             nm, dlat, dlng = fallback_hotels[idx_h]
             combined_raw.append(
                 RawStayEntity(
@@ -908,12 +924,16 @@ async def discover_destination_stays(
                     lat=dest.lat + dlat,
                     lng=dest.lng + dlng,
                     micro_region=f"{dest.short_name} Central Vista",
-                    stars_or_tier=4.78 - idx_h * 0.04,
+                    stars_or_tier=4.78 - idx_h * 0.03,
                 )
             )
             idx_h += 1
 
-    deduped = deduplicate_raw_entities(combined_raw)[:4]
+    deduped_pool = deduplicate_raw_entities(combined_raw)
+    if pool_offset > 0 and len(deduped_pool) > 1:
+        off = pool_offset % len(deduped_pool)
+        deduped_pool = deduped_pool[off:] + deduped_pool[:off]
+    deduped = deduped_pool[:desired]
 
     priced: List[StayCandidate] = []
     # Distinct value/quality/location tiers so strict Pareto frontier exposes genuine trade-offs

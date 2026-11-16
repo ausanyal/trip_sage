@@ -397,7 +397,9 @@ def solve_daily_vrptw_2opt(
     return stops_out, round(max(12.0, total_km), 1), max(20, int(round(best_drv))), loop_coords
 
 
-def strict_pareto_rank_and_filter(candidates: List[ParetoBlueprint]) -> List[ParetoBlueprint]:
+def strict_pareto_rank_and_filter(
+    candidates: List[ParetoBlueprint], max_results: int = 3
+) -> List[ParetoBlueprint]:
     """NSGA-II Non-Dominated Sorting + Crowding Distance over 3D objectives:
     Minimize (total_core_landed_inr, fatigue_score, -composite_utility).
     """
@@ -463,13 +465,19 @@ def strict_pareto_rank_and_filter(candidates: List[ParetoBlueprint]) -> List[Par
         for idx in front:
             candidates[idx].crowding_distance = round(min(10.0, crowding[idx]), 3)
 
-    # Select strictly non-dominated Front 1; include Front 2 runner-ups only if Front 1 is singleton
+    # Select strictly non-dominated Front 1; pull runner-up fronts up to max_results when requested
+    target_k = max(3, min(8, max_results))
     front1_indices = fronts[0]
     selected_indices = list(front1_indices)
-    if len(selected_indices) < 3 and len(fronts) > 1:
-        runner_ups = sorted(fronts[1], key=lambda idx: (-candidates[idx].crowding_distance, objs[idx][0]))
-        selected_indices.extend(runner_ups[: 3 - len(selected_indices)])
-    selected_indices = selected_indices[:3]
+    for f_pos in range(1, len(fronts)):
+        if len(selected_indices) >= target_k:
+            break
+        runner_ups = sorted(
+            fronts[f_pos],
+            key=lambda idx: (-candidates[idx].crowding_distance, objs[idx][0]),
+        )
+        selected_indices.extend(runner_ups[: target_k - len(selected_indices)])
+    selected_indices = selected_indices[:target_k]
 
     # Identify Utopia Knee on Front 1 (minimum normalized distance to ideal point)
     mins = [min(objs[i][d] for i in selected_indices) for d in range(3)]

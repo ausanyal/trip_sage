@@ -1209,10 +1209,30 @@ export default function TripSageWorkspacePage() {
                 <Layers size={17} aria-hidden="true" color="var(--accent-primary)" />
                 Strict Non-Dominated Pareto Frontier ({optimization.blueprints.length} Solved)
               </h2>
-              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                {optimization.pareto_frontier_note ??
-                  "NSGA-II 3D Frontier across Cost × Fatigue × Utility"}
-              </span>
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.55rem" }}>
+                <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                  {optimization.pareto_frontier_note ??
+                    "NSGA-II 3D Frontier across Cost × Fatigue × Utility"}
+                </span>
+                <button
+                  type="button"
+                  disabled={isPlanning}
+                  className="btn"
+                  style={{ minBlockSize: "1.95rem", padding: "0.2rem 0.6rem", fontSize: "0.74rem" }}
+                  onClick={() =>
+                    void handleSendMessage(
+                      `Search more similar places to stay in ${optimization.trip_spec.destination} so I have more options to choose from`
+                    )
+                  }
+                >
+                  <Plus size={12} aria-hidden="true" />
+                  <span>
+                    {(optimization.trip_spec.stay_options_limit ?? 3) < 6
+                      ? "More Stay Options"
+                      : "Next Batch of Stays"}
+                  </span>
+                </button>
+              </div>
             </div>
 
             <div className="blueprint-grid">
