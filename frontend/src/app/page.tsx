@@ -104,15 +104,29 @@ function buildInitialWayanadConversation(
   ];
 }
 
+const CONFIGURED_API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "").replace(
+  /\/+$/,
+  ""
+);
+
 async function fetchPlannerApi(
   path: string,
   init: RequestInit
 ): Promise<Response> {
-  try {
-    const direct = await fetch(`http://127.0.0.1:8000${path}`, init);
-    if (direct.ok) return direct;
-  } catch {
-    // Fall back to Next.js rewrite route when hosted behind same origin
+  if (CONFIGURED_API_BASE) {
+    return fetch(`${CONFIGURED_API_BASE}${path}`, init);
+  }
+  if (
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1")
+  ) {
+    try {
+      const direct = await fetch(`http://127.0.0.1:8000${path}`, init);
+      if (direct.ok) return direct;
+    } catch {
+      // Fall back to Next.js streaming route proxy
+    }
   }
   return fetch(path, init);
 }
