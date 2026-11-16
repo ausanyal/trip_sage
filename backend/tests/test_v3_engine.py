@@ -12,6 +12,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+from agent import _deterministic_nlp_extract
 from currency import format_amount_from_inr, infer_currency_from_countries
 from db import cache_get_json, cache_set_json, load_trip_snapshot, save_trip_snapshot
 from main import chat_turn_stream, get_persisted_trip, health_check, persist_trip, run_optimizer_stream
@@ -228,6 +229,33 @@ class TestTripSageV3Engine(unittest.IsolatedAsyncioTestCase):
         fx = {"INR": 1.0, "USD": 0.012, "EUR": 0.011, "GBP": 0.0095}
         self.assertEqual(format_amount_from_inr(100000, "INR", fx), "₹100,000")
         self.assertEqual(format_amount_from_inr(100000, "USD", fx), "$1,200")
+
+    def test_nlp_destination_extraction_strips_trailing_clauses(self) -> None:
+        base_spec = TripSpec(
+            origin="Koramangala, Bengaluru",
+            destination="Wayanad, Kerala",
+            start_date="2026-12-21",
+            end_date="2026-12-26",
+            currency="INR",
+        )
+        req_us = ChatTurnRequest(
+            message="Plan a road trip from Austin, Texas to Sedona, Arizona in a 2 BHK villa",
+            current_spec=base_spec,
+        )
+        spec_us, _, _ = _deterministic_nlp_extract(req_us)
+        self.assertEqual(spec_us.origin, "Austin, Texas")
+        self.assertEqual(spec_us.destination, "Sedona, Arizona")
+        self.assertIsNone(spec_us.currency)
+        self.assertEqual(spec_us.destination_villa_bhk, 2)
+
+        req_in = ChatTurnRequest(
+            message="Plan a road trip from Mangaluru to Gokarna in a 2 BHK villa",
+            current_spec=spec_us,
+        )
+        spec_in, _, _ = _deterministic_nlp_extract(req_in)
+        self.assertEqual(spec_in.origin, "Mangaluru")
+        self.assertEqual(spec_in.destination, "Gokarna")
+        self.assertIsNone(spec_in.currency)
 
     async def test_serpapi_live_hotel_adapter_parsing(self) -> None:
         os.environ["SERPAPI_API_KEY"] = "mock-serp-key"

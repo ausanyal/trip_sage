@@ -107,11 +107,15 @@ async def _call_gemini_spec_extractor(
 
 def _clean_place_phrase(raw: str) -> str:
     cleaned = re.split(
-        r"\b(?:from|on|between|for|with|in\s+a\s+\d|in\s+dec|in\s+jan|staying|via|prefer|driving|and\s+we)\b",
+        r"\b(?:from|on|between|for|with|within|under|around|staying|via|prefer|driving|flying|using|leaving|starting|"
+        r"in\s+(?:a|an|the|my|our|\d|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|"
+        r"hotel|hotels|villa|villas|airbnb|resort|resorts|boutique|private|luxury|budget|usd|inr|eur|gbp)|"
+        r"and\s+(?:we|stay|return|fly|drive|prefer))\b",
         raw,
         maxsplit=1,
         flags=re.IGNORECASE,
     )[0]
+    cleaned = re.sub(r"\s+\b(?:in|on|at|for|with|by|a|an|the)$", "", cleaned.strip(" .,;:-"), flags=re.IGNORECASE)
     cleaned = cleaned.strip(" .,;:-")
     return " ".join(w.capitalize() if w.islower() else w for w in cleaned.split())
 
@@ -126,7 +130,7 @@ def _deterministic_nlp_extract(req: ChatTurnRequest) -> Tuple[TripSpec, List[str
 
     # 1. Generic "from <Origin> to <Destination>" or "trip to / go to / visit <Destination>"
     from_to = re.search(
-        r"\bfrom\s+([A-Za-z][A-Za-z\s,]{1,35}?)\s+to\s+([A-Za-z][A-Za-z\s,]{2,35})",
+        r"\bfrom\s+([A-Za-z][A-Za-z\s,.-]{1,38}?)\s+to\s+([A-Za-z][A-Za-z0-9\s,.-]{2,48})",
         msg,
         flags=re.IGNORECASE,
     )
@@ -137,7 +141,7 @@ def _deterministic_nlp_extract(req: ChatTurnRequest) -> Tuple[TripSpec, List[str
             if cand_orig.lower() != spec.origin.lower():
                 spec.origin = cand_orig
                 updates.append(f"Origin -> {cand_orig}")
-            if cand_dest.lower() not in spec.destination.lower():
+            if cand_dest.lower() != spec.destination.lower():
                 spec.destination = cand_dest
                 spec.pinned_stays = []
                 spec.currency = None
@@ -145,13 +149,13 @@ def _deterministic_nlp_extract(req: ChatTurnRequest) -> Tuple[TripSpec, List[str
                 updates.append(f"Destination -> {cand_dest}")
     else:
         to_match = re.search(
-            r"\b(?:trip\s+to|go\s+to|visit|travel\s+to|plan\s+for|switch\s+destination\s+to)\s+([A-Za-z][A-Za-z\s,]{2,32})",
+            r"\b(?:trip\s+to|go\s+to|visit|travel\s+to|plan\s+for|switch\s+destination\s+to)\s+([A-Za-z][A-Za-z0-9\s,.-]{2,44})",
             msg,
             flags=re.IGNORECASE,
         )
         if to_match:
             cand_dest = _clean_place_phrase(to_match.group(1))
-            if len(cand_dest) >= 3 and cand_dest.lower() not in spec.destination.lower():
+            if len(cand_dest) >= 3 and cand_dest.lower() != spec.destination.lower():
                 spec.destination = cand_dest
                 spec.pinned_stays = []
                 spec.currency = None
@@ -314,6 +318,9 @@ async def process_chat_turn(
 
     if gemini_result is not None:
         updated_spec, updates, needs_clar, questions, preface, llm_ms = gemini_result
+        if updated_spec.destination.strip().lower() != req.current_spec.destination.strip().lower():
+            if not re.search(r"\b(inr|usd|eur|gbp|rupees?|dollars?|euros?|pounds?)\b|[₹$€£]", req.message, re.I):
+                updated_spec.currency = None
         opt = await solve_trip_pareto(updated_spec, on_phase=on_phase, persist_snapshot=False)
         opt.tool_trace.insert(
             0,

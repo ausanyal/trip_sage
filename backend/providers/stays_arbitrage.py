@@ -12,6 +12,7 @@ from urllib.parse import quote_plus
 import httpx
 from bs4 import BeautifulSoup
 
+from currency import format_amount_from_inr, infer_currency_from_countries
 from db import RATE_LIMITER, cache_get_json, cache_set_json
 from models import (
     ChannelOffer,
@@ -293,67 +294,110 @@ async def fetch_osm_hospitality(
         return restored
 
     overpass_q = f"""
-    [out:json][timeout:6];
+    [out:json][timeout:8];
     (
       node["tourism"~"hotel|resort|chalet|guest_house|apartment"]["name"](around:{radius_m},{loc.lat},{loc.lng});
-      way["tourism"~"hotel|resort|chalet|guest_house|apartment"]["name"](around:{radius_m},{loc.lat},{loc.lng});
+      way["tourism"~"resort|chalet"]["name"](around:{min(radius_m, 14000)},{loc.lat},{loc.lng});
     );
-    out center 45;
+    out center 55;
     """
 
     entities: List[RawStayEntity] = []
-    try:
-        await RATE_LIMITER.acquire("overpass_stays", min_interval_sec=0.35)
-        async with httpx.AsyncClient(timeout=6.0, headers={"User-Agent": USER_AGENT}) as client:
-            resp = await client.post("https://overpass-api.de/api/interpreter", data={"data": overpass_q})
-            if resp.status_code == 200:
-                elems = (resp.json() or {}).get("elements") or []
-                elems.sort(
-                    key=lambda el: sum(
-                        1 for k in ("stars", "website", "wikidata", "brand", "phone") if k in (el.get("tags") or {})
-                    ),
-                    reverse=True,
-                )
-                for el in elems:
-                    tags = el.get("tags") or {}
-                    nm = str(tags.get("name:en") or tags.get("name") or "").strip()
-                    if not nm or len(nm) < 3:
-                        continue
-                    if name_filter and name_filter.lower().split()[0] not in nm.lower():
-                        continue
-                    elat = el.get("lat") or (el.get("center") or {}).get("lat")
-                    elng = el.get("lon") or (el.get("center") or {}).get("lon")
-                    if elat is None or elng is None:
-                        continue
-
-                    t_type = str(tags.get("tourism") or "hotel")
-                    cat: StayCategory = (
-                        "villa"
-                        if t_type in ("chalet", "apartment") or any(w in nm.lower() for w in ("villa", "estate", "homestay"))
-                        else ("airbnb" if t_type == "guest_house" else "hotel")
+    for ov_url in (
+        "https://overpass-api.de/api/interpreter",
+        "https://lz4.overpass-api.de/api/interpreter",
+    ):
+        if entities:
+            break
+        try:
+            await RATE_LIMITER.acquire("overpass_stays", min_interval_sec=0.35)
+            async with httpx.AsyncClient(timeout=8.0, headers={"User-Agent": USER_AGENT}) as client:
+                resp = await client.post(ov_url, data={"data": overpass_q})
+                if resp.status_code == 200:
+                    elems = (resp.json() or {}).get("elements") or []
+                    elems.sort(
+                        key=lambda el: sum(
+                            1 for k in ("stars", "website", "wikidata", "brand", "phone") if k in (el.get("tags") or {})
+                        ),
+                        reverse=True,
                     )
-                    suburb = str(tags.get("addr:suburb") or tags.get("addr:city") or f"{loc.short_name} Scenic Belt")
-                    website = str(tags.get("website") or "").strip() or None
-                    stars_raw = str(tags.get("stars") or "4.6")
-                    try:
-                        rating_est = min(4.96, max(4.2, 4.1 + float(re.findall(r"\d+(?:\.\d+)?", stars_raw)[0]) * 0.16))
-                    except Exception:
-                        rating_est = 4.72
+                    for el in elems:
+                        tags = el.get("tags") or {}
+                        nm = str(tags.get("name:en") or tags.get("name") or "").strip()
+                        if not nm or len(nm) < 3:
+                            continue
+                        if name_filter and name_filter.lower().split()[0] not in nm.lower():
+                            continue
+                        elat = el.get("lat") or (el.get("center") or {}).get("lat")
+                        elng = el.get("lon") or (el.get("center") or {}).get("lon")
+                        if elat is None or elng is None:
+                            continue
 
-                    entities.append(
-                        RawStayEntity(
-                            name=nm,
-                            category=cat,
-                            lat=float(elat),
-                            lng=float(elng),
-                            micro_region=suburb,
-                            stars_or_tier=round(rating_est, 2),
-                            direct_url=website,
-                            source_channel="osm_overpass_live",
+                        t_type = str(tags.get("tourism") or "hotel")
+                        cat: StayCategory = (
+                            "villa"
+                            if t_type in ("chalet", "apartment")
+                            or any(w in nm.lower() for w in ("villa", "estate", "homestay", "cottage", "sanctuary", "paradise", "retreat"))
+                            else ("airbnb" if t_type == "guest_house" else "hotel")
                         )
-                    )
-    except Exception:
-        pass
+                        suburb = str(tags.get("addr:suburb") or tags.get("addr:city") or f"{loc.short_name} Scenic Belt")
+                        website = str(tags.get("website") or "").strip() or None
+                        stars_raw = str(tags.get("stars") or "4.6")
+                        try:
+                            rating_est = min(4.96, max(4.2, 4.1 + float(re.findall(r"\d+(?:\.\d+)?", stars_raw)[0]) * 0.16))
+                        except Exception:
+                            rating_est = 4.72
+
+                        entities.append(
+                            RawStayEntity(
+                                name=nm,
+                                category=cat,
+                                lat=float(elat),
+                                lng=float(elng),
+                                micro_region=suburb,
+                                stars_or_tier=round(rating_est, 2),
+                                direct_url=website,
+                                source_channel="osm_overpass_live",
+                            )
+                        )
+        except Exception:
+            pass
+
+    # Supplement via fast Nominatim hospitality search if Overpass returned < 4 stays
+    if len(entities) < 4:
+        search_q = f"{name_filter} {loc.short_name}" if name_filter else f"resort hotel in {loc.short_name}"
+        try:
+            await RATE_LIMITER.acquire("nominatim", min_interval_sec=0.85)
+            async with httpx.AsyncClient(timeout=4.5, headers={"User-Agent": USER_AGENT}) as client:
+                n_resp = await client.get(
+                    "https://nominatim.openstreetmap.org/search",
+                    params={"q": search_q, "format": "jsonv2", "limit": 8},
+                )
+                if n_resp.status_code == 200:
+                    for n_idx, row in enumerate(n_resp.json() or []):
+                        nm = str(row.get("name") or "").strip()
+                        if not nm or len(nm) < 3:
+                            continue
+                        n_type = str(row.get("type") or "hotel").lower()
+                        cat_n: StayCategory = (
+                            "villa"
+                            if n_type in ("chalet", "apartment")
+                            or any(w in nm.lower() for w in ("villa", "cottage", "retreat", "resort", "lodge"))
+                            else ("airbnb" if n_type == "guest_house" else "hotel")
+                        )
+                        entities.append(
+                            RawStayEntity(
+                                name=nm,
+                                category=cat_n,
+                                lat=float(row["lat"]),
+                                lng=float(row["lon"]),
+                                micro_region=f"{loc.short_name} Hospitality Corridor",
+                                stars_or_tier=round(4.82 - (n_idx % 4) * 0.05, 2),
+                                source_channel="nominatim_osm_live",
+                            )
+                        )
+        except Exception:
+            pass
 
     deduped = deduplicate_raw_entities(entities)
     _OSM_STAY_MEM[cache_key] = deduped
@@ -452,7 +496,7 @@ def price_stay_candidate(
                 booking_url=raw.direct_url or f"https://www.google.com/travel/hotels?q={q_search}",
             ),
             ChannelOffer(
-                platform="MakeMyTrip",
+                platform="MakeMyTrip" if country_code == "in" else "Expedia",
                 channel_type="ota",
                 base_total_inr=mmt_base,
                 extra_bed_or_addons_inr=extra_bed_ota + gala_supplement,
@@ -461,9 +505,13 @@ def price_stay_candidate(
                 promo_discount_inr=mmt_promo,
                 landed_total_inr=mmt_landed,
                 per_night_landed_inr=mmt_landed // nights,
-                inclusions=["Breakfast", "Instant Bank Card Discount"],
-                promo_note="Festive HDFC/ICICI card instant discount modeled at checkout",
-                booking_url=f"https://www.makemytrip.com/hotels/",
+                inclusions=["Breakfast", "Instant Card / Member Promo"],
+                promo_note=(
+                    "Festive HDFC/ICICI card instant discount modeled at checkout"
+                    if country_code == "in"
+                    else "Expedia OneKey member tier discount modeled at checkout"
+                ),
+                booking_url="https://www.makemytrip.com/hotels/" if country_code == "in" else f"https://www.expedia.com/Hotel-Search?destination={q_search}",
             ),
             ChannelOffer(
                 platform="Agoda",
@@ -490,7 +538,7 @@ def price_stay_candidate(
                 landed_total_inr=bkg_landed,
                 per_night_landed_inr=bkg_landed // nights,
                 inclusions=["Breakfast", "Free Cancellation Window"],
-                promo_note=f"Priced with {int(gst_rate * 100)}% statutory tax slab",
+                promo_note=f"Priced with {int(gst_rate * 100)}% {'statutory GST' if country_code == 'in' else 'local lodging tax'}",
                 booking_url="https://www.booking.com/",
             ),
         ]
@@ -504,11 +552,22 @@ def price_stay_candidate(
         if bhk > 2 and not raw.scraped_nightly_inr:
             nightly_net = int(round(nightly_net * (1.0 + 0.24 * (bhk - 2)), -2))
         base_villa = nightly_net * nights
-        gst_rate = 0.18 if (nightly_net > 7500 and country_code == "in") else 0.12
+        gst_rate = 0.18 if (nightly_net > 7500 and country_code == "in") else (0.12 if country_code == "in" else 0.125)
 
         if raw.category in ("bluekite", "villa"):
-            direct_portal = "The Blue Kite Direct" if raw.category == "bluekite" else "StayVista / Direct Villa Portal"
-            direct_url = raw.direct_url or ("https://www.thebluekite.com/" if raw.category == "bluekite" else "https://www.stayvista.com/")
+            if raw.category == "bluekite":
+                direct_portal = "The Blue Kite Direct"
+                direct_url = raw.direct_url or "https://www.thebluekite.com/"
+            elif country_code == "in":
+                direct_portal = "StayVista / Direct Villa Portal"
+                direct_url = raw.direct_url or "https://www.stayvista.com/"
+            else:
+                direct_portal = "Plum Guide / Direct Villa Portal"
+                direct_url = raw.direct_url or f"https://www.plumguide.com/search?destination={q_search}"
+
+            sec_ota_name = "MakeMyTrip Villas" if country_code == "in" else "Vrbo"
+            sec_ota_url = "https://www.makemytrip.com/homestays/" if country_code == "in" else f"https://www.vrbo.com/search?destination={q_search}"
+
             dir_tax = int(round(base_villa * gst_rate))
             dir_promo = int(round(base_villa * 0.06))
             dir_landed = base_villa + dir_tax - dir_promo
@@ -534,12 +593,12 @@ def price_stay_candidate(
                     promo_discount_inr=dir_promo,
                     landed_total_inr=dir_landed,
                     per_night_landed_inr=dir_landed // nights,
-                    inclusions=[f"Entire {bhk} BHK Villa", "Caretaker & Housekeeping", "Zero Platform Service Fee"],
+                    inclusions=[f"Entire {bhk} BR Private Stay", "Concierge & Housekeeping", "Zero Platform Service Fee"],
                     promo_note="Direct portal strips ~14.2% Airbnb guest service fee",
                     booking_url=direct_url,
                 ),
                 ChannelOffer(
-                    platform="MakeMyTrip Villas",
+                    platform=sec_ota_name,
                     channel_type="ota",
                     base_total_inr=ota_base,
                     platform_or_cleaning_fee_inr=ota_fee,
@@ -547,9 +606,9 @@ def price_stay_candidate(
                     promo_discount_inr=ota_promo,
                     landed_total_inr=ota_landed,
                     per_night_landed_inr=ota_landed // nights,
-                    inclusions=[f"Entire {bhk} BHK Villa", "Caretaker"],
-                    promo_note="Syndicated villa inventory + bank promo",
-                    booking_url="https://www.makemytrip.com/homestays/",
+                    inclusions=[f"Entire {bhk} BR Villa", "Verified Host"],
+                    promo_note="Syndicated vacation-rental inventory + portal promo",
+                    booking_url=sec_ota_url,
                 ),
                 ChannelOffer(
                     platform="Airbnb",
@@ -560,9 +619,9 @@ def price_stay_candidate(
                     promo_discount_inr=0,
                     landed_total_inr=abnb_landed,
                     per_night_landed_inr=abnb_landed // nights,
-                    inclusions=[f"Entire {bhk} BHK Home"],
-                    promo_note="Same physical villa syndicated with ~14.2% Airbnb guest service + cleaning fee",
-                    booking_url="https://www.airbnb.co.in/",
+                    inclusions=[f"Entire {bhk} BR Home"],
+                    promo_note="Same physical property syndicated with ~14.2% Airbnb guest service + cleaning fee",
+                    booking_url="https://www.airbnb.com/" if country_code != "in" else "https://www.airbnb.co.in/",
                 ),
             ]
         else:
@@ -579,12 +638,12 @@ def price_stay_candidate(
                     promo_discount_inr=0,
                     landed_total_inr=abnb_landed,
                     per_night_landed_inr=abnb_landed // nights,
-                    inclusions=[f"Entire {bhk} BHK Superhost Home", "Full Kitchen", "Private Garden/Deck"],
+                    inclusions=[f"Entire {bhk} BR Superhost Home", "Full Kitchen", "Private Deck"],
                     promo_note="Airbnb Guest Favorite · Exclusive host listing",
-                    booking_url="https://www.airbnb.co.in/",
+                    booking_url="https://www.airbnb.com/" if country_code != "in" else "https://www.airbnb.co.in/",
                 )
             ]
-        bedrooms_label = room_override_label or f"{bhk} BHK Entire Private Stay + Living Lounge"
+        bedrooms_label = room_override_label or f"{bhk} {'BHK' if country_code == 'in' else 'BR'} Entire Private Stay + Living Lounge"
 
     offers.sort(key=lambda o: o.landed_total_inr)
     offers[0].is_best_deal = True
@@ -598,20 +657,24 @@ def price_stay_candidate(
         min(98.5, 84.0 + (savings / max(1, worst.landed_total_inr)) * 45.0 + (4.0 if in_budget else 0.0) + bk_bonus), 1
     )
 
+    local_cur = infer_currency_from_countries(country_code, country_code)
+    fmt_sav = format_amount_from_inr(savings, local_cur)
+    fmt_nightly = format_amount_from_inr(best.per_night_landed_inr, local_cur)
+
     badge = (
-        f"Saves ₹{savings:,} via {best.platform}"
+        f"Saves {fmt_sav} via {best.platform}"
         if savings > 0
-        else f"Top-Rated {bhk} BHK @ ₹{best.per_night_landed_inr // 1000}k/N"
+        else f"Top-Rated {bhk} {'BHK' if country_code == 'in' else 'BR'} @ {fmt_nightly}/N"
     )
 
     highlights = [
-        f"Best checkout rate on {best.platform}: ₹{best.per_night_landed_inr:,}/night landed ({nights}N)",
+        f"Best checkout rate on {best.platform}: {fmt_nightly}/night landed ({nights}N)",
         f"Strategically located in {raw.micro_region} to minimize daily excursion driving",
     ]
     if savings > 0:
         highlights.insert(
             1,
-            f"Cross-channel deduplication saves ₹{savings:,} vs. {worst.platform} checkout total",
+            f"Cross-channel deduplication saves {fmt_sav} vs. {worst.platform} checkout total",
         )
     if spans_gala_eve and raw.category != "hotel":
         highlights.append("Private stay on Dec 24/31 avoids mandatory 5-star resort festive gala surcharges")
@@ -777,11 +840,40 @@ async def discover_destination_stays(
         osm_villas = [e for e in osm_entities if e.category in ("villa", "airbnb")]
         combined_raw.extend(osm_villas[:4])
 
-        fallback_templates: List[Tuple[str, StayCategory, float, float]] = [
-            (f"StayVista Crest {spec.destination_villa_bhk}BHK Pool Villa — {dest.short_name}", "villa", 0.012, -0.011),
-            (f'"{dest.short_name} Ridge" Superhost {spec.destination_villa_bhk}BR Chalet', "airbnb", -0.014, 0.015),
-            (f"SaffronStays Sanctuary {spec.destination_villa_bhk}BHK Estate — {dest.short_name}", "villa", 0.007, 0.018),
-        ]
+        # If OSM tagged real local resorts/lodges as 'hotel', include top properties as private suite/villa options
+        if len(combined_raw) < 4:
+            for osm_h in osm_entities:
+                if len(combined_raw) >= 4:
+                    break
+                if osm_h.category == "hotel":
+                    combined_raw.append(
+                        RawStayEntity(
+                            name=osm_h.name,
+                            category="villa" if len(combined_raw) % 2 == 0 else "airbnb",
+                            lat=osm_h.lat,
+                            lng=osm_h.lng,
+                            micro_region=osm_h.micro_region,
+                            stars_or_tier=osm_h.stars_or_tier,
+                            direct_url=osm_h.direct_url,
+                            source_channel=osm_h.source_channel,
+                        )
+                    )
+
+        is_in = dest.country_code == "in"
+        unit_lbl = f"{spec.destination_villa_bhk}BHK" if is_in else f"{spec.destination_villa_bhk}BR"
+        fallback_templates: List[Tuple[str, StayCategory, float, float]] = (
+            [
+                (f"StayVista Crest {unit_lbl} Pool Villa — {dest.short_name}", "villa", 0.012, -0.011),
+                (f'"{dest.short_name} Ridge" Superhost {unit_lbl} Chalet', "airbnb", -0.014, 0.015),
+                (f"SaffronStays Sanctuary {unit_lbl} Estate — {dest.short_name}", "villa", 0.007, 0.018),
+            ]
+            if is_in
+            else [
+                (f"Plum Guide Signature {unit_lbl} Villa — {dest.short_name}", "villa", 0.012, -0.011),
+                (f'"{dest.short_name} Vista" Superhost {unit_lbl} Residence', "airbnb", -0.014, 0.015),
+                (f"Vrbo Premier {unit_lbl} Estate — {dest.short_name}", "villa", 0.007, 0.018),
+            ]
+        )
         idx_t = 0
         while len(combined_raw) < 4 and idx_t < len(fallback_templates):
             nm, cat, dlat, dlng = fallback_templates[idx_t]
@@ -799,6 +891,8 @@ async def discover_destination_stays(
     else:
         osm_hotels = [e for e in osm_entities if e.category == "hotel"]
         combined_raw.extend(osm_hotels[:4])
+        if len(combined_raw) < 4:
+            combined_raw.extend([e for e in osm_entities if e.category != "hotel"][: 4 - len(combined_raw)])
         idx_h = 0
         fallback_hotels = [
             (f"Grand Heritage Resort & Spa {dest.short_name}", 0.008, -0.007),
@@ -826,7 +920,7 @@ async def discover_destination_stays(
     band_shifts = [1.0, 0.88, 1.07, 0.94]
     for idx, ent in enumerate(deduped):
         band_shift = band_shifts[idx % len(band_shifts)]
-        wiki_photo = await fetch_wikimedia_photo(ent.name, dest.short_name) if ent.category == "hotel" else None
+        wiki_photo = await fetch_wikimedia_photo(ent.name, dest.short_name)
         cand = price_stay_candidate(
             raw=ent,
             stay_id=f"dest-stay-{idx + 1}",
@@ -843,25 +937,28 @@ async def discover_destination_stays(
         )
         priced.append(cand)
 
+    portal_label = "StayVista & SaffronStays" if dest.country_code == "in" else "Plum Guide & Vrbo"
+    ota_label = "Brand Direct · MMT · Agoda · Booking" if dest.country_code == "in" else "Brand Direct · Expedia · Booking · Agoda"
+
     coverage = [
         PlatformCoverageNote(
             platform="Airbnb",
             status="matched",
             listings_scanned=max(32, len(osm_entities) * 3 + 24),
-            note=f"Scanned {spec.destination_villa_bhk} BHK homes & chalets in {dest.short_name} with ~14.2% guest service fee normalization.",
+            note=f"Scanned {spec.destination_villa_bhk} {'BHK' if dest.country_code == 'in' else 'BR'} homes & chalets in {dest.short_name} with ~14.2% guest service fee normalization.",
         ),
         bk_coverage,
         PlatformCoverageNote(
-            platform="StayVista & SaffronStays",
+            platform=portal_label,
             status="matched" if wants_villas else "live_scanned",
             listings_scanned=24,
             note=f"Deduplicated syndicated private villas in {dest.short_name} where direct portal rates strip OTA fees.",
         ),
         PlatformCoverageNote(
-            platform="Brand Direct · MMT · Agoda · Booking",
+            platform=ota_label,
             status="live_scanned",
             listings_scanned=max(16, len(osm_entities) + len(spec.pinned_stays) * 4),
-            note="Compared statutory GST slabs, child/extra-bed policies, and festive bank-card promos (Benchmark Mode — add SERPAPI_API_KEY for live quotes).",
+            note="Compared statutory tax slabs, child/extra-bed policies, and member promos (Benchmark Mode — add SERPAPI_API_KEY for live quotes).",
         ),
     ]
 

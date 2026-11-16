@@ -186,38 +186,43 @@ async def geocode_place(query: str) -> GeoLocation:
 
     short_default = query.split(",")[0].strip() or query.strip()
 
-    try:
-        await RATE_LIMITER.acquire("nominatim", min_interval_sec=0.85)
-        async with httpx.AsyncClient(timeout=3.8, headers={"User-Agent": USER_AGENT}) as client:
-            resp = await client.get(
-                "https://nominatim.openstreetmap.org/search",
-                params={
-                    "q": query,
-                    "format": "jsonv2",
-                    "addressdetails": 1,
-                    "limit": 1,
-                },
-            )
-            if resp.status_code == 200:
-                rows = resp.json()
-                if rows:
-                    top = rows[0]
-                    addr = top.get("address") or {}
-                    cc = str(addr.get("country_code", "in")).lower()
-                    loc = GeoLocation(
-                        query=query,
-                        short_name=short_default,
-                        display_name=str(top.get("display_name", query)),
-                        lat=float(top["lat"]),
-                        lng=float(top["lon"]),
-                        country_code=cc,
-                        source="nominatim_live",
-                    )
-                    _GEOCODE_MEM[key] = loc
-                    cache_set_json(sql_key, "nominatim", dataclasses.asdict(loc), ttl_seconds=604800)
-                    return loc
-    except Exception:
-        pass
+    candidate_queries = [query.strip()]
+    if short_default and short_default.lower() != query.strip().lower():
+        candidate_queries.append(short_default)
+
+    for q_try in candidate_queries:
+        try:
+            await RATE_LIMITER.acquire("nominatim", min_interval_sec=0.85)
+            async with httpx.AsyncClient(timeout=4.5, headers={"User-Agent": USER_AGENT}) as client:
+                resp = await client.get(
+                    "https://nominatim.openstreetmap.org/search",
+                    params={
+                        "q": q_try,
+                        "format": "jsonv2",
+                        "addressdetails": 1,
+                        "limit": 1,
+                    },
+                )
+                if resp.status_code == 200:
+                    rows = resp.json()
+                    if rows:
+                        top = rows[0]
+                        addr = top.get("address") or {}
+                        cc = str(addr.get("country_code", "in")).lower()
+                        loc = GeoLocation(
+                            query=query,
+                            short_name=short_default,
+                            display_name=str(top.get("display_name", query)),
+                            lat=float(top["lat"]),
+                            lng=float(top["lon"]),
+                            country_code=cc,
+                            source="nominatim_live",
+                        )
+                        _GEOCODE_MEM[key] = loc
+                        cache_set_json(sql_key, "nominatim", dataclasses.asdict(loc), ttl_seconds=604800)
+                        return loc
+        except Exception:
+            pass
 
     # Resilient fallback when offline or rate-limited
     for token, (lat, lng, cc) in OFFLINE_GAZETTEER.items():
@@ -437,134 +442,243 @@ async def discover_pois(
         return restored, src
 
     overpass_query = f"""
-    [out:json][timeout:6];
+    [out:json][timeout:8];
     (
-      node["natural"~"waterfall|peak|cave_entrance|beach"](around:{radius_m},{lat},{lng});
-      way["natural"~"waterfall|peak|cave_entrance|beach"](around:{radius_m},{lat},{lng});
+      node["natural"~"waterfall|peak|cave_entrance|beach|cliff|rock"](around:{radius_m},{lat},{lng});
       node["tourism"~"viewpoint|attraction|museum|zoo"](around:{radius_m},{lat},{lng});
-      way["tourism"~"viewpoint|attraction|museum|zoo"](around:{radius_m},{lat},{lng});
-      node["historic"~"monument|fort|archaeological_site|castle|ruins"](around:{radius_m},{lat},{lng});
-      node["leisure"~"nature_reserve|park"](around:{radius_m},{lat},{lng});
-      node["amenity"="restaurant"]["name"](around:{min(radius_m, 16000)},{lat},{lng});
+      node["historic"~"monument|fort|archaeological_site|castle|ruins|temple"](around:{radius_m},{lat},{lng});
+      node["leisure"~"nature_reserve|park"](around:{min(radius_m, 18000)},{lat},{lng});
+      node["amenity"="restaurant"]["name"](around:{min(radius_m, 14000)},{lat},{lng});
     );
-    out center 75;
+    out 80;
     """
 
     discovered: List[DiscoveredPOI] = []
     seen_names: set[str] = set()
 
-    try:
-        await RATE_LIMITER.acquire("overpass", min_interval_sec=0.35)
-        async with httpx.AsyncClient(timeout=6.0, headers={"User-Agent": USER_AGENT}) as client:
-            resp = await client.post(
-                "https://overpass-api.de/api/interpreter",
-                data={"data": overpass_query},
-            )
-            if resp.status_code == 200:
-                elements = (resp.json() or {}).get("elements") or []
-                elements.sort(
-                    key=lambda el: sum(
-                        1
-                        for k in ("wikipedia", "wikidata", "website", "cuisine", "opening_hours")
-                        if k in (el.get("tags") or {})
-                    ),
-                    reverse=True,
-                )
-                for idx, el in enumerate(elements):
-                    tags = el.get("tags") or {}
-                    name = str(tags.get("name:en") or tags.get("name") or "").strip()
-                    if not name or len(name) < 3:
-                        continue
-                    norm = name.lower()
-                    if norm in seen_names:
-                        continue
-                    seen_names.add(norm)
-
-                    elat = el.get("lat") or (el.get("center") or {}).get("lat")
-                    elng = el.get("lon") or (el.get("center") or {}).get("lon")
-                    if elat is None or elng is None:
-                        continue
-
-                    oh_raw = str(tags.get("opening_hours") or "").strip() or None
-
-                    if tags.get("amenity") == "restaurant":
-                        cuisine = str(tags.get("cuisine") or "Regional & Multi-Cuisine").replace(";", ", ").replace("_", " ").title()
-                        veg_tag = tags.get("diet:vegetarian")
-                        if activities.dietary == "veg" and veg_tag == "no":
+    for ov_url in (
+        "https://overpass-api.de/api/interpreter",
+        "https://lz4.overpass-api.de/api/interpreter",
+    ):
+        if discovered:
+            break
+        try:
+            await RATE_LIMITER.acquire("overpass", min_interval_sec=0.35)
+            async with httpx.AsyncClient(timeout=8.5, headers={"User-Agent": USER_AGENT}) as client:
+                resp = await client.post(ov_url, data={"data": overpass_query})
+                if resp.status_code == 200:
+                    elements = (resp.json() or {}).get("elements") or []
+                    elements.sort(
+                        key=lambda el: sum(
+                            1
+                            for k in ("wikipedia", "wikidata", "website", "cuisine", "opening_hours")
+                            if k in (el.get("tags") or {})
+                        ),
+                        reverse=True,
+                    )
+                    for idx, el in enumerate(elements):
+                        tags = el.get("tags") or {}
+                        name = str(tags.get("name:en") or tags.get("name") or "").strip()
+                        if not name or len(name) < 3:
                             continue
-                        diet_label = (
-                            f"Pure Veg / Veg-Friendly ({cuisine})"
-                            if activities.dietary == "veg"
-                            else f"Veg + Non-Veg Regional ({cuisine})"
-                        )
-                        discovered.append(
-                            DiscoveredPOI(
-                                id=f"poi-din-{idx}",
-                                name=name,
-                                category="dining",
-                                lat=float(elat),
-                                lng=float(elng),
-                                cuisine_or_tag=cuisine,
-                                description=f"OpenStreetMap verified local dining stop in {city_short} ({cuisine}).",
-                                opening_hours_raw=oh_raw or "11:30-22:30",
-                                dietary_note=diet_label,
+                        norm = name.lower()
+                        if norm in seen_names:
+                            continue
+                        seen_names.add(norm)
+
+                        elat = el.get("lat") or (el.get("center") or {}).get("lat")
+                        elng = el.get("lon") or (el.get("center") or {}).get("lon")
+                        if elat is None or elng is None:
+                            continue
+
+                        oh_raw = str(tags.get("opening_hours") or "").strip() or None
+
+                        if tags.get("amenity") == "restaurant":
+                            cuisine = str(tags.get("cuisine") or "Regional & Multi-Cuisine").replace(";", ", ").replace("_", " ").title()
+                            veg_tag = tags.get("diet:vegetarian")
+                            if activities.dietary == "veg" and veg_tag == "no":
+                                continue
+                            diet_label = (
+                                f"Pure Veg / Veg-Friendly ({cuisine})"
+                                if activities.dietary == "veg"
+                                else f"Veg + Non-Veg Regional ({cuisine})"
                             )
+                            discovered.append(
+                                DiscoveredPOI(
+                                    id=f"poi-din-{idx}",
+                                    name=name,
+                                    category="dining",
+                                    lat=float(elat),
+                                    lng=float(elng),
+                                    cuisine_or_tag=cuisine,
+                                    description=f"OpenStreetMap verified local dining stop in {city_short} ({cuisine}).",
+                                    opening_hours_raw=oh_raw or "11:30-22:30",
+                                    dietary_note=diet_label,
+                                )
+                            )
+                        elif tags.get("natural") in ("peak", "waterfall", "cave_entrance", "cliff", "rock", "beach") or tags.get("tourism") == "viewpoint":
+                            nat = str(tags.get("natural") or tags.get("tourism") or "scenic").replace("_", " ").title()
+                            cat = "climb" if activities.moderate_climbs else "nature"
+                            discovered.append(
+                                DiscoveredPOI(
+                                    id=f"poi-clm-{idx}",
+                                    name=name,
+                                    category=cat,
+                                    lat=float(elat),
+                                    lng=float(elng),
+                                    cuisine_or_tag=nat,
+                                    description=f"OpenStreetMap verified {nat.lower()} excursion near {city_short} with panoramic vistas.",
+                                    opening_hours_raw=oh_raw or "08:00-17:00",
+                                    kid_note="Scheduled in cool morning window by VRPTW solver before midday heat.",
+                                    insider_tip=(
+                                        f"OSM Hours: {oh_raw}"
+                                        if oh_raw
+                                        else "Arrive before 09:30 AM for clearest views & easy parking."
+                                    ),
+                                )
+                            )
+                        elif tags.get("historic") or tags.get("tourism") in ("museum", "attraction", "zoo"):
+                            tag_lbl = str(tags.get("historic") or tags.get("tourism") or "heritage").replace("_", " ").title()
+                            if not activities.wildlife_safari and "safari" in norm:
+                                continue
+                            discovered.append(
+                                DiscoveredPOI(
+                                    id=f"poi-her-{idx}",
+                                    name=name,
+                                    category="heritage",
+                                    lat=float(elat),
+                                    lng=float(elng),
+                                    cuisine_or_tag=tag_lbl,
+                                    description=f"Local {tag_lbl.lower()} highlight in the {city_short} micro-corridor.",
+                                    opening_hours_raw=oh_raw or "09:30-17:30",
+                                )
+                            )
+                        else:
+                            discovered.append(
+                                DiscoveredPOI(
+                                    id=f"poi-nat-{idx}",
+                                    name=name,
+                                    category="nature",
+                                    lat=float(elat),
+                                    lng=float(elng),
+                                    cuisine_or_tag="Nature Reserve",
+                                    description=f"Scenic green corridor & nature walk around {city_short}.",
+                                    opening_hours_raw=oh_raw or "08:00-18:00",
+                                )
+                            )
+        except Exception:
+            pass
+
+    # Supplement sightseeing landmarks via fast Wikipedia GeoSearch (~180ms globally) when needed
+    sightseeing_count = sum(1 for p in discovered if p.category != "dining")
+    if sightseeing_count < 6:
+        try:
+            async with httpx.AsyncClient(timeout=4.0, headers={"User-Agent": USER_AGENT}) as client:
+                w_resp = await client.get(
+                    "https://en.wikipedia.org/w/api.php",
+                    params={
+                        "action": "query",
+                        "list": "geosearch",
+                        "gscoord": f"{lat}|{lng}",
+                        "gsradius": 10000,
+                        "gslimit": 30,
+                        "format": "json",
+                    },
+                )
+                if w_resp.status_code == 200:
+                    geo_items = ((w_resp.json() or {}).get("query") or {}).get("geosearch") or []
+                    skip_words = (
+                        "school", "district", "county", "station", "airport", "highway",
+                        "route ", "census", "hospital", "college", "municipality", "taluk",
+                        "constituency", "election",
+                    )
+                    for w_idx, item in enumerate(geo_items):
+                        title = str(item.get("title") or "").strip()
+                        t_low = title.lower()
+                        if not title or t_low == city_short.lower() or t_low in seen_names:
+                            continue
+                        if any(sw in t_low for sw in skip_words):
+                            continue
+                        seen_names.add(t_low)
+                        wlat = float(item.get("lat", lat))
+                        wlng = float(item.get("lon", lng))
+                        is_outdoor = any(
+                            kw in t_low
+                            for kw in ("rock", "peak", "beach", "falls", "waterfall", "canyon", "trail", "park", "lake", "hill", "island", "cave", "bridge", "point")
                         )
-                    elif tags.get("natural") in ("peak", "waterfall", "cave_entrance") or tags.get("tourism") == "viewpoint":
-                        nat = str(tags.get("natural") or tags.get("tourism") or "scenic").replace("_", " ").title()
-                        cat = "climb" if activities.moderate_climbs else "nature"
+                        if is_outdoor:
+                            cat_w = "climb" if activities.moderate_climbs else "nature"
+                            discovered.append(
+                                DiscoveredPOI(
+                                    id=f"wiki-nat-{w_idx}",
+                                    name=title,
+                                    category=cat_w,
+                                    lat=wlat,
+                                    lng=wlng,
+                                    cuisine_or_tag="Landmark & Vista",
+                                    description=f"Notable landmark & scenic stop near {city_short} (Wikipedia GeoSearch verified).",
+                                    opening_hours_raw="07:30-17:30",
+                                    kid_note="Scheduled in cool morning window by VRPTW solver.",
+                                    insider_tip="Arrive early for unobstructed views & parking.",
+                                )
+                            )
+                        else:
+                            discovered.append(
+                                DiscoveredPOI(
+                                    id=f"wiki-her-{w_idx}",
+                                    name=title,
+                                    category="heritage",
+                                    lat=wlat,
+                                    lng=wlng,
+                                    cuisine_or_tag="Cultural Landmark",
+                                    description=f"Notable cultural & historic site in {city_short} (Wikipedia GeoSearch verified).",
+                                    opening_hours_raw="09:00-18:00",
+                                )
+                            )
+        except Exception:
+            pass
+
+    # Supplement local restaurants via Nominatim structured search if Overpass dining returned < 4
+    if sum(1 for p in discovered if p.category == "dining") < 4:
+        try:
+            await RATE_LIMITER.acquire("nominatim", min_interval_sec=0.85)
+            async with httpx.AsyncClient(timeout=4.5, headers={"User-Agent": USER_AGENT}) as client:
+                r_resp = await client.get(
+                    "https://nominatim.openstreetmap.org/search",
+                    params={
+                        "q": f"restaurant in {city_short}",
+                        "format": "jsonv2",
+                        "limit": 8,
+                    },
+                )
+                if r_resp.status_code == 200:
+                    for r_idx, row in enumerate(r_resp.json() or []):
+                        r_name = str(row.get("name") or "").strip()
+                        if not r_name or r_name.lower() in seen_names:
+                            continue
+                        seen_names.add(r_name.lower())
                         discovered.append(
                             DiscoveredPOI(
-                                id=f"poi-clm-{idx}",
-                                name=name,
-                                category=cat,
-                                lat=float(elat),
-                                lng=float(elng),
-                                cuisine_or_tag=nat,
-                                description=f"OpenStreetMap verified {nat.lower()} excursion near {city_short} with panoramic vistas.",
-                                opening_hours_raw=oh_raw or "08:00-17:00",
-                                kid_note="Scheduled in cool morning window by VRPTW solver before midday heat.",
-                                insider_tip=(
-                                    f"OSM Hours: {oh_raw}"
-                                    if oh_raw
-                                    else "Arrive before 09:30 AM for clearest views & easy parking."
+                                id=f"nom-din-{r_idx}",
+                                name=r_name,
+                                category="dining",
+                                lat=float(row["lat"]),
+                                lng=float(row["lon"]),
+                                cuisine_or_tag="Local & Regional Dining",
+                                description=f"OpenStreetMap verified restaurant in {city_short}.",
+                                opening_hours_raw="11:30-22:30",
+                                dietary_note=(
+                                    "Pure Veg / Veg-Friendly Options"
+                                    if activities.dietary == "veg"
+                                    else "Veg + Non-Veg Local Specialties"
                                 ),
                             )
                         )
-                    elif tags.get("historic") or tags.get("tourism") in ("museum", "attraction", "zoo"):
-                        tag_lbl = str(tags.get("historic") or tags.get("tourism") or "heritage").replace("_", " ").title()
-                        if not activities.wildlife_safari and "safari" in norm:
-                            continue
-                        discovered.append(
-                            DiscoveredPOI(
-                                id=f"poi-her-{idx}",
-                                name=name,
-                                category="heritage",
-                                lat=float(elat),
-                                lng=float(elng),
-                                cuisine_or_tag=tag_lbl,
-                                description=f"Local {tag_lbl.lower()} highlight in the {city_short} micro-corridor.",
-                                opening_hours_raw=oh_raw or "09:30-17:30",
-                            )
-                        )
-                    else:
-                        discovered.append(
-                            DiscoveredPOI(
-                                id=f"poi-nat-{idx}",
-                                name=name,
-                                category="nature",
-                                lat=float(elat),
-                                lng=float(elng),
-                                cuisine_or_tag="Nature Reserve",
-                                description=f"Scenic green corridor & nature walk around {city_short}.",
-                                opening_hours_raw=oh_raw or "08:00-18:00",
-                            )
-                        )
-    except Exception:
-        pass
+        except Exception:
+            pass
 
     live_hit = len(discovered) >= 4
-    source = "overpass_osm_live" if live_hit else "regional_synthesizer_fallback"
+    source = "overpass_wikimedia_live" if live_hit else "regional_synthesizer_fallback"
 
     climbs_pool = [p for p in discovered if p.category in ("climb", "nature")]
     heritage_pool = [p for p in discovered if p.category == "heritage"]
