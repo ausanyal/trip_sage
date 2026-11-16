@@ -541,6 +541,29 @@ export default function TripSageWorkspacePage() {
     displayedUnoptBaselineInr - displayedCoreLandedInr
   );
 
+  const staysBestInr = blueprint.stays.reduce(
+    (acc, s) => acc + s.best_landed_inr,
+    0
+  );
+  const totalStayNights = blueprint.stays.reduce(
+    (acc, s) => acc + Math.max(1, s.nights),
+    0
+  );
+  const primaryStay = blueprint.stays.reduce<StayCandidate | null>(
+    (best, s) => (!best || s.nights >= best.nights ? s : best),
+    null
+  );
+  const focusedDayObj =
+    activeDay !== null
+      ? blueprint.days.find((d) => d.day_number === activeDay) ?? null
+      : null;
+  const groundLedgerLabel =
+    optimization.trip_spec.transport_mode === "flight"
+      ? "Airport & Local Transfers"
+      : optimization.trip_spec.transport_mode === "hybrid"
+      ? "Rental SUV, Fuel & Tolls"
+      : "Highway Fuel & FASTag Tolls";
+
   const money = useCallback(
     (amountInr: number) => formatMoney(amountInr, currency, fxRates),
     [currency, fxRates]
@@ -1509,59 +1532,317 @@ export default function TripSageWorkspacePage() {
             </div>
           )}
 
-          {/* Synchronized Interactive Slippy Web Mercator Route & Corridor Map */}
-          <RouteCorridorMap
-            blueprint={blueprint}
-            selectedFlight={activeFlight}
-            activeDay={activeDay}
-            effectiveDark={effectiveDark}
-            currency={currency}
-            fxRates={fxRates}
-            onSelectDay={setActiveDay}
-            onInspectStay={setInspectedStay}
-          />
+          {/* 2/3 Corridor Map + 1/3 Live Cost Ledger & Route Companion Grid */}
+          <div className="map-companion-wrap">
+            <div className="map-companion-grid">
+              <RouteCorridorMap
+                blueprint={blueprint}
+                selectedFlight={activeFlight}
+                activeDay={activeDay}
+                effectiveDark={effectiveDark}
+                currency={currency}
+                fxRates={fxRates}
+                onSelectDay={setActiveDay}
+                onInspectStay={setInspectedStay}
+              />
 
-          {/* Algorithmic Deal Callouts Banner */}
-          <div
-            style={{
-              padding: "0.85rem 1.05rem",
-              borderRadius: "0.85rem",
-              background: "var(--bg-surface)",
-              border: "1px solid var(--border-subtle)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.4rem",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "0.78rem",
-                fontWeight: 800,
-                color: "var(--gold-accent)",
-                display: "flex",
-                alignItems: "center",
-                gap: "0.4rem",
-              }}
-            >
-              <Flame size={15} aria-hidden="true" />
-              Algorithmic Arbitrage &amp; VRPTW Timing Insights Caught on This Route
+              <aside
+                className="map-companion-panel"
+                aria-label="Core All-In Cost Ledger and Corridor Insights"
+              >
+                {/* Top Block: Live Itemized Core All-In Cost Ledger */}
+                <div
+                  style={{
+                    padding: "0.85rem 1rem",
+                    borderBlockEnd: "1px solid var(--border-subtle)",
+                    background: "var(--bg-elevated)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.48rem",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "0.4rem",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "0.75rem",
+                        fontWeight: 800,
+                        letterSpacing: "0.03em",
+                        textTransform: "uppercase",
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      Core All-In Ledger
+                    </span>
+                    <span className="badge badge-emerald">
+                      <TrendingDown size={12} aria-hidden="true" /> Saved{" "}
+                      {money(displayedSavingsInr)}
+                    </span>
+                  </div>
+
+                  <div className="ledger-row">
+                    <span style={{ color: "var(--text-secondary)" }}>
+                      Stays ({blueprint.stays.length}{" "}
+                      {blueprint.stays.length === 1 ? "leg" : "legs"} · {totalStayNights}N)
+                    </span>
+                    <strong style={{ fontWeight: 700 }}>{money(staysBestInr)}</strong>
+                  </div>
+
+                  {activeFlight && (
+                    <div className="ledger-row">
+                      <span style={{ color: "var(--text-secondary)" }}>
+                        Flights ({activeFlight.origin_iata && activeFlight.dest_iata
+                          ? `${activeFlight.origin_iata} ↔ ${activeFlight.dest_iata}`
+                          : "Round-Trip"})
+                      </span>
+                      <strong style={{ fontWeight: 700 }}>
+                        {money(activeFlight.landed_family_total_inr)}
+                      </strong>
+                    </div>
+                  )}
+
+                  <div className="ledger-row">
+                    <span style={{ color: "var(--text-secondary)" }}>
+                      {groundLedgerLabel}
+                    </span>
+                    <strong style={{ fontWeight: 700 }}>
+                      {money(blueprint.road.total_road_cost_inr)}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={{
+                      paddingBlockStart: "0.45rem",
+                      marginBlockStart: "0.1rem",
+                      borderBlockStart: "1px dashed var(--border-subtle)",
+                      display: "flex",
+                      alignItems: "baseline",
+                      justifyContent: "space-between",
+                      gap: "0.5rem",
+                    }}
+                  >
+                    <span style={{ fontSize: "0.82rem", fontWeight: 800 }}>
+                      Landed Core Total
+                    </span>
+                    <div style={{ textAlign: "end" }}>
+                      <span
+                        style={{
+                          fontSize: "1.05rem",
+                          fontWeight: 800,
+                          color: "var(--accent-primary)",
+                        }}
+                      >
+                        {money(displayedCoreLandedInr)}
+                      </span>
+                      <span
+                        style={{
+                          marginInlineStart: "0.4rem",
+                          fontSize: "0.74rem",
+                          textDecoration: "line-through",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {money(displayedUnoptBaselineInr)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "0.4rem",
+                      marginBlockStart: "0.15rem",
+                    }}
+                  >
+                    <span style={{ fontSize: "0.71rem", color: "var(--text-muted)" }}>
+                      +{money(blueprint.dining_and_activities_est_inr)} est. dining &amp; entry
+                    </span>
+                    {primaryStay && (
+                      <button
+                        type="button"
+                        className="btn"
+                        style={{
+                          minBlockSize: "1.85rem",
+                          padding: "0.18rem 0.55rem",
+                          fontSize: "0.73rem",
+                        }}
+                        onClick={() => setInspectedStay(primaryStay)}
+                      >
+                        <ShieldCheck size={13} aria-hidden="true" color="var(--accent-primary)" />
+                        <span>Inspect Fee Math</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Bottom Block: Synchronized Day Snapshot (when D1..DN selected) OR Arbitrage & VRPTW Insights */}
+                <div
+                  style={{
+                    padding: "0.85rem 1rem",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.5rem",
+                    flex: "1 1 auto",
+                  }}
+                >
+                  {focusedDayObj ? (
+                    <>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexWrap: "wrap",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "0.4rem",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: "0.78rem",
+                            fontWeight: 800,
+                            color: "var(--route-blue)",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.35rem",
+                          }}
+                        >
+                          <Compass size={14} aria-hidden="true" />
+                          Day {focusedDayObj.day_number} · {focusedDayObj.date_label}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{
+                            minBlockSize: "1.65rem",
+                            padding: "0.12rem 0.48rem",
+                            fontSize: "0.7rem",
+                          }}
+                          onClick={() => setActiveDay(null)}
+                        >
+                          Full Route
+                        </button>
+                      </div>
+
+                      <div style={{ fontSize: "0.84rem", fontWeight: 700, lineHeight: 1.3 }}>
+                        {focusedDayObj.headline}
+                      </div>
+
+                      <div style={{ fontSize: "0.73rem", color: "var(--text-muted)" }}>
+                        {focusedDayObj.drive_km} km · {focusedDayObj.drive_time_label} · Overnight:{" "}
+                        <strong style={{ color: "var(--text-secondary)" }}>
+                          {focusedDayObj.overnight_label}
+                        </strong>
+                      </div>
+
+                      <ul
+                        role="list"
+                        style={{
+                          margin: 0,
+                          padding: 0,
+                          listStyle: "none",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "0.35rem",
+                        }}
+                      >
+                        {focusedDayObj.stops.slice(0, 4).map((st) => (
+                          <li
+                            key={st.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "flex-start",
+                              gap: "0.42rem",
+                              fontSize: "0.76rem",
+                              lineHeight: 1.32,
+                            }}
+                          >
+                            <span style={{ marginBlockStart: "0.1rem", flexShrink: 0 }}>
+                              {stopCategoryIcon(st.category)}
+                            </span>
+                            <span style={{ minInlineSize: 0 }}>
+                              <strong style={{ color: "var(--text-primary)" }}>
+                                {st.time_window.split("–")[0].trim()}
+                              </strong>{" "}
+                              <span style={{ color: "var(--text-secondary)" }}>
+                                {st.title}
+                              </span>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : (
+                    <>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexWrap: "wrap",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "0.35rem",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: "0.78rem",
+                            fontWeight: 800,
+                            color: "var(--gold-accent)",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.38rem",
+                          }}
+                        >
+                          <Flame size={14} aria-hidden="true" />
+                          Arbitrage &amp; VRPTW Insights
+                        </span>
+                        <span className="badge badge-route">
+                          Fatigue {blueprint.fatigue_score} · Score {blueprint.quality_score}
+                        </span>
+                      </div>
+
+                      <ul
+                        role="list"
+                        style={{
+                          margin: 0,
+                          paddingInlineStart: "1.05rem",
+                          fontSize: "0.78rem",
+                          lineHeight: 1.42,
+                          color: "var(--text-secondary)",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "0.32rem",
+                        }}
+                      >
+                        {blueprint.arbitrage_callouts.map((c, idx) => (
+                          <li key={idx}>{c}</li>
+                        ))}
+                      </ul>
+
+                      <div
+                        style={{
+                          marginBlockStart: "auto",
+                          paddingBlockStart: "0.4rem",
+                          fontSize: "0.72rem",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        Tip: Click <strong>D1–D{blueprint.days.length}</strong> on the map header to preview each day&apos;s corridor &amp; time windows here.
+                      </div>
+                    </>
+                  )}
+                </div>
+              </aside>
             </div>
-            <ul
-              role="list"
-              style={{
-                margin: 0,
-                paddingInlineStart: "1.15rem",
-                fontSize: "0.82rem",
-                color: "var(--text-secondary)",
-                display: "flex",
-                flexDirection: "column",
-                gap: "0.22rem",
-              }}
-            >
-              {blueprint.arbitrage_callouts.map((c, idx) => (
-                <li key={idx}>{c}</li>
-              ))}
-            </ul>
           </div>
 
           {/* Primary Detail Tabs: Itinerary | Cross-Channel Arbitrage | Road, Tolls & Gates */}

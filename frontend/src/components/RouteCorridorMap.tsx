@@ -138,12 +138,15 @@ export function RouteCorridorMap({
   onSelectDay,
   onInspectStay,
 }: RouteCorridorMapProps) {
-  const width = 880;
-  const height = 420;
+  const width = 800;
+  const height = 440;
 
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
   const [mapStyle, setMapStyle] = useState<"topo" | "satellite" | "vector">("topo");
   const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [showWheelZoomHint, setShowWheelZoomHint] = useState<boolean>(false);
+  const wheelHintTimerRef = useRef<number | null>(null);
+  const lastWheelHintAtRef = useRef<number>(0);
 
   const activeFlight = selectedFlight ?? blueprint.flights[0] ?? null;
   const hasFlightCoords =
@@ -272,15 +275,49 @@ export function RouteCorridorMap({
     [zoomAroundClientPoint]
   );
 
-  const handleWheel = useCallback(
-    (e: React.WheelEvent<HTMLDivElement>) => {
-      if (!e.ctrlKey && !e.metaKey && Math.abs(e.deltaY) < 18) return;
-      e.preventDefault();
-      const dir = e.deltaY < 0 ? 1 : -1;
-      zoomAroundClientPoint(e.clientX, e.clientY, dir);
-    },
-    [zoomAroundClientPoint]
-  );
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const onNativeWheel = (ev: WheelEvent) => {
+      // Cooperative scroll handling: let unmodified vertical/horizontal scroll pass straight
+      // through to the page document so scrolling over the map never hijacks page scroll!
+      if (!ev.ctrlKey && !ev.metaKey) {
+        if (Math.abs(ev.deltaY) >= 14) {
+          const now = Date.now();
+          if (now - lastWheelHintAtRef.current > 1800) {
+            lastWheelHintAtRef.current = now;
+            setShowWheelZoomHint(true);
+            if (wheelHintTimerRef.current !== null) {
+              window.clearTimeout(wheelHintTimerRef.current);
+            }
+            wheelHintTimerRef.current = window.setTimeout(() => {
+              setShowWheelZoomHint(false);
+            }, 1500);
+          }
+        }
+        return;
+      }
+
+      ev.preventDefault();
+      if (Math.abs(ev.deltaY) < 2) return;
+      const dir = ev.deltaY < 0 ? 1 : -1;
+      zoomAroundClientPoint(ev.clientX, ev.clientY, dir);
+    };
+
+    el.addEventListener("wheel", onNativeWheel, { passive: false });
+    return () => {
+      el.removeEventListener("wheel", onNativeWheel);
+    };
+  }, [zoomAroundClientPoint]);
+
+  useEffect(() => {
+    return () => {
+      if (wheelHintTimerRef.current !== null) {
+        window.clearTimeout(wheelHintTimerRef.current);
+      }
+    };
+  }, []);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement | null;
@@ -514,6 +551,10 @@ export function RouteCorridorMap({
   return (
     <div
       style={{
+        display: "flex",
+        flexDirection: "column",
+        minInlineSize: 0,
+        blockSize: "100%",
         borderRadius: "1rem",
         border: "1px solid var(--border-subtle)",
         background: "var(--bg-surface)",
@@ -526,16 +567,16 @@ export function RouteCorridorMap({
           display: "flex",
           flexWrap: "wrap",
           alignItems: "center",
-          gap: "0.6rem",
-          padding: "0.85rem 1.1rem",
+          gap: "0.5rem",
+          padding: "0.75rem 1rem",
           borderBlockEnd: "1px solid var(--border-subtle)",
           background: "var(--bg-elevated)",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          <Compass size={18} aria-hidden="true" style={{ color: "var(--route-blue)" }} />
-          <span style={{ fontWeight: 700, fontSize: "0.9rem" }}>
-            Interactive Slippy Corridor &amp; VRPTW Map
+        <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+          <Compass size={17} aria-hidden="true" style={{ color: "var(--route-blue)" }} />
+          <span style={{ fontWeight: 700, fontSize: "0.88rem" }}>
+            Corridor &amp; VRPTW Map
           </span>
         </div>
 
@@ -555,7 +596,7 @@ export function RouteCorridorMap({
             marginInlineStart: "auto",
             display: "flex",
             flexWrap: "wrap",
-            gap: "0.35rem",
+            gap: "0.3rem",
           }}
           role="group"
           aria-label="Filter and zoom route map by itinerary day"
@@ -563,7 +604,7 @@ export function RouteCorridorMap({
           <button
             type="button"
             className={`btn ${activeDay === null ? "btn-active-preset" : ""}`}
-            style={{ minBlockSize: "2rem", padding: "0.2rem 0.6rem", fontSize: "0.75rem" }}
+            style={{ minBlockSize: "1.9rem", padding: "0.18rem 0.55rem", fontSize: "0.74rem" }}
             onClick={() => onSelectDay(null)}
           >
             Full Route
@@ -573,7 +614,7 @@ export function RouteCorridorMap({
               key={d.day_number}
               type="button"
               className={`btn ${activeDay === d.day_number ? "btn-active-preset" : ""}`}
-              style={{ minBlockSize: "2rem", padding: "0.2rem 0.6rem", fontSize: "0.75rem" }}
+              style={{ minBlockSize: "1.9rem", padding: "0.18rem 0.52rem", fontSize: "0.74rem" }}
               onClick={() =>
                 onSelectDay(activeDay === d.day_number ? null : d.day_number)
               }
@@ -588,7 +629,6 @@ export function RouteCorridorMap({
       <div
         ref={containerRef}
         onDoubleClick={handleDoubleClick}
-        onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -597,7 +637,8 @@ export function RouteCorridorMap({
           position: "relative",
           aspectRatio: `${width} / ${height}`,
           inlineSize: "100%",
-          overflow: "hidden",
+          flex: "0 0 auto",
+          overflow: "clip",
           cursor: isDragging ? "grabbing" : "grab",
           touchAction: "pan-y",
           userSelect: "none",
@@ -1083,6 +1124,30 @@ export function RouteCorridorMap({
           </button>
         </div>
 
+        {/* Non-blocking Cooperative Scroll-Zoom Hint Pill */}
+        {showWheelZoomHint && (
+          <div
+            aria-live="polite"
+            style={{
+              position: "absolute",
+              insetBlockStart: "0.75rem",
+              insetInlineStart: "0.75rem",
+              zIndex: 6,
+              padding: "0.3rem 0.65rem",
+              borderRadius: "0.5rem",
+              background: "rgba(8, 17, 30, 0.88)",
+              border: "1px solid rgba(52, 211, 153, 0.45)",
+              color: "#ecfdf5",
+              fontSize: "0.72rem",
+              fontWeight: 600,
+              pointerEvents: "none",
+              boxShadow: "0 6px 18px rgba(0, 0, 0, 0.28)",
+            }}
+          >
+            Hold ⌘ / Ctrl + scroll or double-click to zoom map
+          </div>
+        )}
+
         {/* Keyless Basemap Attribution Pill */}
         {mapStyle !== "vector" && (
           <div
@@ -1107,47 +1172,48 @@ export function RouteCorridorMap({
       {/* Interactive Legend & Selected Stop Bar */}
       <div
         style={{
+          marginBlockStart: "auto",
           display: "flex",
           flexWrap: "wrap",
           alignItems: "center",
           justifyContent: "space-between",
-          gap: "0.75rem",
-          padding: "0.65rem 1rem",
+          gap: "0.55rem",
+          padding: "0.6rem 0.95rem",
           background: "rgba(7, 11, 18, 0.94)",
           borderBlockStart: "1px solid rgba(148, 163, 184, 0.16)",
-          fontSize: "0.76rem",
+          fontSize: "0.73rem",
           color: "#cbd5e1",
         }}
       >
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.9rem", alignItems: "center" }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
-            <Hotel size={13} aria-hidden="true" color="#10b981" /> Stay Anchors (Click pin for fee breakdown)
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.7rem", alignItems: "center" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+            <Hotel size={13} aria-hidden="true" color="#10b981" /> Stay Pins
           </span>
           {flightArc && (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
-              <Plane size={13} aria-hidden="true" color="#fbbf24" /> Gateway Flight Arc
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+              <Plane size={13} aria-hidden="true" color="#fbbf24" /> Flight Arc
             </span>
           )}
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
-            <Mountain size={13} aria-hidden="true" color="#fbbf24" /> Climbs &amp; Trails
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+            <Mountain size={13} aria-hidden="true" color="#fbbf24" /> Climbs
           </span>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
-            <Utensils size={13} aria-hidden="true" color="#f472b6" /> Regional Dining
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+            <Utensils size={13} aria-hidden="true" color="#f472b6" /> Dining
           </span>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
-            <ShieldAlert size={13} aria-hidden="true" color="#fbbf24" /> Checkpost Window Verified
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+            <ShieldAlert size={13} aria-hidden="true" color="#fbbf24" /> Checkpost
           </span>
         </div>
 
         {selectedStop ? (
-          <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", color: "#fde68a" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", color: "#fde68a" }}>
             <MapPin size={13} aria-hidden="true" />
             <strong>{selectedStop.stop.title}</strong> ({selectedStop.stop.time_window})
           </div>
         ) : (
           <span style={{ color: "#94a3b8" }}>
             <Flame size={12} aria-hidden="true" style={{ display: "inline", marginInlineEnd: 4 }} />
-            Double-click to zoom · Drag to pan · Click D1–D{blueprint.days.length} to focus day
+            Double-click or ⌘/Ctrl+scroll to zoom · Drag to pan
           </span>
         )}
       </div>
