@@ -143,6 +143,9 @@ export interface FlightOption {
   depart_time: string;
   arrive_time: string;
   duration: string;
+  return_depart_time?: string | null;
+  return_arrive_time?: string | null;
+  return_duration?: string | null;
   stops_label: string;
   landed_family_total_inr: number;
   ota_unoptimized_inr: number;

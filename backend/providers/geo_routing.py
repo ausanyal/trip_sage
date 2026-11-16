@@ -34,6 +34,7 @@ class AirportHub:
     lat: float
     lng: float
     is_regional: bool = False
+    tz_offset_mins: int = 330
 
 
 @dataclass
@@ -51,92 +52,151 @@ class DiscoveredPOI:
     insider_tip: Optional[str] = None
 
 
-# Reference airport coordinate index for Haversine nearest-gateway resolution (India + Global Hubs)
+# Reference airport coordinate + UTC timezone index (India + Global Hubs)
 AIRPORT_INDEX: List[AirportHub] = [
-    AirportHub("BLR", "Kempegowda International", "Bengaluru", 13.1986, 77.7066),
-    AirportHub("MYQ", "Mysore Airport", "Mysuru", 12.2300, 76.6558, is_regional=True),
-    AirportHub("CNN", "Kannur International", "Kannur", 11.9186, 75.5472, is_regional=True),
-    AirportHub("CCJ", "Calicut International", "Kozhikode", 11.1368, 75.9553),
-    AirportHub("COK", "Cochin International", "Kochi", 10.1520, 76.4019),
-    AirportHub("TRV", "Trivandrum International", "Thiruvananthapuram", 8.4821, 76.9200),
-    AirportHub("CJB", "Coimbatore International", "Coimbatore", 11.0300, 77.0434),
-    AirportHub("MAA", "Chennai International", "Chennai", 12.9941, 80.1709),
-    AirportHub("IXE", "Mangaluru International", "Mangaluru", 12.9613, 74.8901),
-    AirportHub("GOX", "Manohar International (Mopa)", "North Goa", 15.7336, 73.8681, is_regional=True),
-    AirportHub("GOI", "Goa Dabolim International", "South/Central Goa", 15.3808, 73.8314),
-    AirportHub("BOM", "Chhatrapati Shivaji Maharaj Intl", "Mumbai", 19.0896, 72.8656),
-    AirportHub("PNQ", "Pune International", "Pune", 18.5821, 73.9197),
-    AirportHub("HYD", "Rajiv Gandhi International", "Hyderabad", 17.2403, 78.4294),
-    AirportHub("DEL", "Indira Gandhi International", "New Delhi", 28.5562, 77.1000),
-    AirportHub("DED", "Jolly Grant Airport", "Dehradun", 30.1897, 78.1803, is_regional=True),
-    AirportHub("PGH", "Pantnagar Airport", "Pantnagar", 29.0334, 79.4737, is_regional=True),
-    AirportHub("IXC", "Shaheed Bhagat Singh Intl", "Chandigarh", 30.6735, 76.7885),
-    AirportHub("ATQ", "Sri Guru Ram Dass Jee Intl", "Amritsar", 31.7096, 74.7973),
-    AirportHub("SXR", "Sheikh ul-Alam International", "Srinagar", 33.9871, 74.7742),
-    AirportHub("IXL", "Kushok Bakula Rimpochee", "Leh", 34.1359, 77.5465, is_regional=True),
-    AirportHub("JAI", "Jaipur International", "Jaipur", 26.8242, 75.8122),
-    AirportHub("UDR", "Maharana Pratap Airport", "Udaipur", 24.6177, 73.8961, is_regional=True),
-    AirportHub("JDH", "Jodhpur Airport", "Jodhpur", 26.2511, 73.0489, is_regional=True),
-    AirportHub("AMD", "Sardar Vallabhbhai Patel Intl", "Ahmedabad", 23.0772, 72.6347),
-    AirportHub("CCU", "Netaji Subhas Chandra Bose Intl", "Kolkata", 22.6547, 88.4467),
-    AirportHub("IXB", "Bagdogra International", "Siliguri", 26.6812, 88.3286, is_regional=True),
-    AirportHub("GAU", "Lokpriya Gopinath Bordoloi Intl", "Guwahati", 26.1061, 91.5859),
-    AirportHub("DXB", "Dubai International", "Dubai", 25.2532, 55.3657),
-    AirportHub("AUH", "Zayed International", "Abu Dhabi", 24.4439, 54.6511),
-    AirportHub("DOH", "Hamad International", "Doha", 25.2731, 51.6081),
-    AirportHub("CMB", "Bandaranaike International", "Colombo", 7.1808, 79.8841),
-    AirportHub("MLE", "Velana International", "Malé", 4.1918, 73.5291),
-    AirportHub("SIN", "Singapore Changi", "Singapore", 1.3644, 103.9915),
-    AirportHub("KUL", "Kuala Lumpur International", "Kuala Lumpur", 2.7456, 101.7099),
-    AirportHub("BKK", "Suvarnabhumi", "Bangkok", 13.6900, 100.7501),
-    AirportHub("DMK", "Don Mueang International", "Bangkok North", 13.9126, 100.6068, is_regional=True),
-    AirportHub("HKT", "Phuket International", "Phuket", 8.1132, 98.3169),
-    AirportHub("DPS", "Ngurah Rai International", "Bali", -8.7482, 115.1672),
-    AirportHub("SUB", "Juanda International", "Surabaya", -7.3798, 112.7869, is_regional=True),
-    AirportHub("CGK", "Soekarno-Hatta International", "Jakarta", -6.1256, 106.6559),
-    AirportHub("DAD", "Da Nang International", "Da Nang", 16.0439, 108.1994),
-    AirportHub("HAN", "Noi Bai International", "Hanoi", 21.2212, 105.8072),
-    AirportHub("SGN", "Tan Son Nhat International", "Ho Chi Minh City", 10.8188, 106.6520),
-    AirportHub("ICN", "Incheon International", "Seoul", 37.4602, 126.4407),
-    AirportHub("NRT", "Narita International", "Tokyo", 35.7720, 140.3929),
-    AirportHub("LHR", "London Heathrow", "London", 51.4700, -0.4543),
-    AirportHub("LGW", "London Gatwick", "London South", 51.1537, -0.1821, is_regional=True),
-    AirportHub("CDG", "Charles de Gaulle", "Paris", 49.0097, 2.5479),
-    AirportHub("FRA", "Frankfurt Airport", "Frankfurt", 50.0379, 8.5622),
-    AirportHub("FCO", "Leonardo da Vinci Fiumicino", "Rome", 41.8003, 12.2389),
-    AirportHub("BCN", "Josep Tarradellas El Prat", "Barcelona", 41.2974, 2.0833),
-    AirportHub("ATH", "Athens International", "Athens", 37.9364, 23.9445),
-    AirportHub("AMS", "Amsterdam Schiphol", "Amsterdam", 52.3105, 4.7683),
-    AirportHub("ZRH", "Zurich Airport", "Zurich", 47.4647, 8.5492),
-    AirportHub("JFK", "John F. Kennedy Intl", "New York", 40.6413, -73.7781),
-    AirportHub("EWR", "Newark Liberty Intl", "Newark", 40.6895, -74.1745, is_regional=True),
-    AirportHub("LAX", "Los Angeles Intl", "Los Angeles", 33.9416, -118.4085),
-    AirportHub("SFO", "San Francisco Intl", "San Francisco", 37.6213, -122.3790),
-    AirportHub("SYD", "Sydney Kingsford Smith", "Sydney", -33.9399, 151.1753),
+    AirportHub("BLR", "Kempegowda International", "Bengaluru", 13.1986, 77.7066, False, 330),
+    AirportHub("MYQ", "Mysore Airport", "Mysuru", 12.2300, 76.6558, True, 330),
+    AirportHub("CNN", "Kannur International", "Kannur", 11.9186, 75.5472, True, 330),
+    AirportHub("CCJ", "Calicut International", "Kozhikode", 11.1368, 75.9553, False, 330),
+    AirportHub("COK", "Cochin International", "Kochi", 10.1520, 76.4019, False, 330),
+    AirportHub("TRV", "Trivandrum International", "Thiruvananthapuram", 8.4821, 76.9200, False, 330),
+    AirportHub("CJB", "Coimbatore International", "Coimbatore", 11.0300, 77.0434, False, 330),
+    AirportHub("IXM", "Madurai Airport", "Madurai", 9.8345, 78.0934, True, 330),
+    AirportHub("MAA", "Chennai International", "Chennai", 12.9941, 80.1709, False, 330),
+    AirportHub("VTZ", "Visakhapatnam International", "Visakhapatnam", 17.7212, 83.2245, True, 330),
+    AirportHub("IXE", "Mangaluru International", "Mangaluru", 12.9613, 74.8901, False, 330),
+    AirportHub("GOX", "Manohar International (Mopa)", "North Goa", 15.7336, 73.8681, True, 330),
+    AirportHub("GOI", "Goa Dabolim International", "South/Central Goa", 15.3808, 73.8314, False, 330),
+    AirportHub("BOM", "Chhatrapati Shivaji Maharaj Intl", "Mumbai", 19.0896, 72.8656, False, 330),
+    AirportHub("PNQ", "Pune International", "Pune", 18.5821, 73.9197, False, 330),
+    AirportHub("NAG", "Dr. Babasaheb Ambedkar Intl", "Nagpur", 21.0922, 79.0472, True, 330),
+    AirportHub("IDR", "Devi Ahilyabai Holkar Airport", "Indore", 22.7217, 75.8011, True, 330),
+    AirportHub("HYD", "Rajiv Gandhi International", "Hyderabad", 17.2403, 78.4294, False, 330),
+    AirportHub("DEL", "Indira Gandhi International", "New Delhi", 28.5562, 77.1000, False, 330),
+    AirportHub("LKO", "Chaudhary Charan Singh Intl", "Lucknow", 26.7606, 80.8893, False, 330),
+    AirportHub("VNS", "Lal Bahadur Shastri Intl", "Varanasi", 25.4524, 82.8593, False, 330),
+    AirportHub("DED", "Jolly Grant Airport", "Dehradun", 30.1897, 78.1803, True, 330),
+    AirportHub("PGH", "Pantnagar Airport", "Pantnagar", 29.0334, 79.4737, True, 330),
+    AirportHub("IXC", "Shaheed Bhagat Singh Intl", "Chandigarh", 30.6735, 76.7885, False, 330),
+    AirportHub("ATQ", "Sri Guru Ram Dass Jee Intl", "Amritsar", 31.7096, 74.7973, False, 330),
+    AirportHub("SXR", "Sheikh ul-Alam International", "Srinagar", 33.9871, 74.7742, False, 330),
+    AirportHub("IXL", "Kushok Bakula Rimpochee", "Leh", 34.1359, 77.5465, True, 330),
+    AirportHub("JAI", "Jaipur International", "Jaipur", 26.8242, 75.8122, False, 330),
+    AirportHub("UDR", "Maharana Pratap Airport", "Udaipur", 24.6177, 73.8961, True, 330),
+    AirportHub("JDH", "Jodhpur Airport", "Jodhpur", 26.2511, 73.0489, True, 330),
+    AirportHub("AMD", "Sardar Vallabhbhai Patel Intl", "Ahmedabad", 23.0772, 72.6347, False, 330),
+    AirportHub("CCU", "Netaji Subhas Chandra Bose Intl", "Kolkata", 22.6547, 88.4467, False, 330),
+    AirportHub("BBI", "Biju Patnaik International", "Bhubaneswar", 20.2444, 85.8178, False, 330),
+    AirportHub("IXB", "Bagdogra International", "Siliguri", 26.6812, 88.3286, True, 330),
+    AirportHub("GAU", "Lokpriya Gopinath Bordoloi Intl", "Guwahati", 26.1061, 91.5859, False, 330),
+    AirportHub("IXZ", "Veer Savarkar International", "Port Blair", 11.6412, 92.7297, False, 330),
+    AirportHub("AGX", "Agatti Airport", "Lakshadweep", 10.8237, 72.1760, True, 330),
+    AirportHub("KTM", "Tribhuvan International", "Kathmandu", 27.6966, 85.3591, False, 345),
+    AirportHub("PBH", "Paro International", "Paro", 27.4032, 89.4246, True, 360),
+    AirportHub("DXB", "Dubai International", "Dubai", 25.2532, 55.3657, False, 240),
+    AirportHub("AUH", "Zayed International", "Abu Dhabi", 24.4439, 54.6511, False, 240),
+    AirportHub("DOH", "Hamad International", "Doha", 25.2731, 51.6081, False, 180),
+    AirportHub("CMB", "Bandaranaike International", "Colombo", 7.1808, 79.8841, False, 330),
+    AirportHub("MLE", "Velana International", "Malé", 4.1918, 73.5291, False, 300),
+    AirportHub("MRU", "Sir Seewoosagur Ramgoolam Intl", "Mauritius", -20.4302, 57.6836, False, 240),
+    AirportHub("SEZ", "Seychelles International", "Mahé", -4.6743, 55.5218, False, 240),
+    AirportHub("SIN", "Singapore Changi", "Singapore", 1.3644, 103.9915, False, 480),
+    AirportHub("KUL", "Kuala Lumpur International", "Kuala Lumpur", 2.7456, 101.7099, False, 480),
+    AirportHub("BKK", "Suvarnabhumi", "Bangkok", 13.6900, 100.7501, False, 420),
+    AirportHub("DMK", "Don Mueang International", "Bangkok North", 13.9126, 100.6068, True, 420),
+    AirportHub("HKT", "Phuket International", "Phuket", 8.1132, 98.3169, False, 420),
+    AirportHub("REP", "Siem Reap Angkor Intl", "Siem Reap", 13.3693, 104.2230, False, 420),
+    AirportHub("DPS", "Ngurah Rai International", "Bali", -8.7482, 115.1672, False, 480),
+    AirportHub("SUB", "Juanda International", "Surabaya", -7.3798, 112.7869, True, 480),
+    AirportHub("CGK", "Soekarno-Hatta International", "Jakarta", -6.1256, 106.6559, False, 420),
+    AirportHub("DAD", "Da Nang International", "Da Nang", 16.0439, 108.1994, False, 420),
+    AirportHub("HAN", "Noi Bai International", "Hanoi", 21.2212, 105.8072, False, 420),
+    AirportHub("SGN", "Tan Son Nhat International", "Ho Chi Minh City", 10.8188, 106.6520, False, 420),
+    AirportHub("MNL", "Ninoy Aquino International", "Manila", 14.5086, 121.0194, False, 480),
+    AirportHub("ICN", "Incheon International", "Seoul", 37.4602, 126.4407, False, 540),
+    AirportHub("NRT", "Narita International", "Tokyo", 35.7720, 140.3929, False, 540),
+    AirportHub("IST", "Istanbul Airport", "Istanbul", 41.2753, 28.7519, False, 180),
+    AirportHub("CAI", "Cairo International", "Cairo", 30.1219, 31.4056, False, 120),
+    AirportHub("LHR", "London Heathrow", "London", 51.4700, -0.4543, False, 0),
+    AirportHub("LGW", "London Gatwick", "London South", 51.1537, -0.1821, True, 0),
+    AirportHub("CDG", "Charles de Gaulle", "Paris", 49.0097, 2.5479, False, 60),
+    AirportHub("FRA", "Frankfurt Airport", "Frankfurt", 50.0379, 8.5622, False, 60),
+    AirportHub("MUC", "Munich Airport", "Munich", 48.3537, 11.7750, False, 60),
+    AirportHub("VIE", "Vienna International", "Vienna", 48.1103, 16.5697, False, 60),
+    AirportHub("FCO", "Leonardo da Vinci Fiumicino", "Rome", 41.8003, 12.2389, False, 60),
+    AirportHub("NAP", "Naples International", "Naples", 40.8860, 14.2908, True, 60),
+    AirportHub("BCN", "Josep Tarradellas El Prat", "Barcelona", 41.2974, 2.0833, False, 60),
+    AirportHub("LIS", "Humberto Delgado Airport", "Lisbon", 38.7756, -9.1354, False, 0),
+    AirportHub("ATH", "Athens International", "Athens", 37.9364, 23.9445, False, 120),
+    AirportHub("AMS", "Amsterdam Schiphol", "Amsterdam", 52.3105, 4.7683, False, 60),
+    AirportHub("ZRH", "Zurich Airport", "Zurich", 47.4647, 8.5492, False, 60),
+    AirportHub("JFK", "John F. Kennedy Intl", "New York", 40.6413, -73.7781, False, -300),
+    AirportHub("EWR", "Newark Liberty Intl", "Newark", 40.6895, -74.1745, True, -300),
+    AirportHub("YYZ", "Toronto Pearson Intl", "Toronto", 43.6777, -79.6248, False, -300),
+    AirportHub("LAX", "Los Angeles Intl", "Los Angeles", 33.9416, -118.4085, False, -480),
+    AirportHub("SFO", "San Francisco Intl", "San Francisco", 37.6213, -122.3790, False, -480),
+    AirportHub("SYD", "Sydney Kingsford Smith", "Sydney", -33.9399, 151.1753, False, 600),
+    AirportHub("AKL", "Auckland Airport", "Auckland", -37.0082, 174.7850, False, 720),
 ]
 
-# Country-level destination resolver so broad country names ("Indonesia", "Thailand", "Japan")
-# resolve to their primary visitor hub rather than an uninhabited geographic centroid.
+# Country & broad-region resolver so broad names ("Indonesia", "Andaman", "Switzerland", "Ladakh")
+# resolve to their primary visitor hub rather than an uninhabited polygon centroid.
 COUNTRY_VISITOR_GATEWAYS: Dict[str, Tuple[str, str, float, float, str]] = {
     "indonesia": ("Bali", "Bali (Denpasar / Ubud), Indonesia", -8.6500, 115.2167, "id"),
+    "bali": ("Bali", "Bali (Seminyak / Ubud), Indonesia", -8.6500, 115.2167, "id"),
     "thailand": ("Phuket", "Phuket & Andaman Coast, Thailand", 7.8804, 98.3923, "th"),
     "vietnam": ("Da Nang", "Da Nang & Hoi An, Vietnam", 16.0544, 108.2022, "vn"),
+    "cambodia": ("Siem Reap", "Siem Reap, Cambodia", 13.3633, 103.8564, "kh"),
+    "philippines": ("Manila", "Manila & Boracay Gateway, Philippines", 14.5995, 120.9842, "ph"),
     "sri lanka": ("Colombo", "Colombo & Galle Coast, Sri Lanka", 6.9271, 79.8612, "lk"),
     "maldives": ("Malé", "Malé Atoll, Maldives", 4.1755, 73.5093, "mv"),
+    "mauritius": ("Grand Baie", "Grand Baie, Mauritius", -20.0089, 57.5816, "mu"),
+    "seychelles": ("Mahé", "Mahé Island, Seychelles", -4.6796, 55.4920, "sc"),
+    "nepal": ("Kathmandu", "Kathmandu & Pokhara Gateway, Nepal", 27.7172, 85.3240, "np"),
+    "bhutan": ("Paro", "Paro & Thimphu, Bhutan", 27.4287, 89.4164, "bt"),
     "malaysia": ("Kuala Lumpur", "Kuala Lumpur, Malaysia", 3.1390, 101.6869, "my"),
     "singapore": ("Singapore", "Singapore", 1.3521, 103.8198, "sg"),
     "japan": ("Tokyo", "Tokyo, Japan", 35.6762, 139.6503, "jp"),
     "south korea": ("Seoul", "Seoul, South Korea", 37.5665, 126.9780, "kr"),
     "uae": ("Dubai", "Dubai, United Arab Emirates", 25.2048, 55.2708, "ae"),
     "united arab emirates": ("Dubai", "Dubai, United Arab Emirates", 25.2048, 55.2708, "ae"),
+    "turkey": ("Istanbul", "Istanbul, Turkey", 41.0082, 28.9784, "tr"),
+    "egypt": ("Cairo", "Cairo & Giza, Egypt", 30.0444, 31.2357, "eg"),
     "switzerland": ("Zurich", "Zurich & Lucerne, Switzerland", 47.3769, 8.5417, "ch"),
+    "swiss alps": ("Interlaken", "Interlaken, Swiss Alps", 46.6863, 7.8632, "ch"),
     "italy": ("Rome", "Rome, Italy", 41.9028, 12.4964, "it"),
+    "amalfi": ("Positano", "Amalfi Coast (Positano / Sorrento), Italy", 40.6281, 14.4850, "it"),
+    "amalfi coast": ("Positano", "Amalfi Coast (Positano / Sorrento), Italy", 40.6281, 14.4850, "it"),
     "france": ("Paris", "Paris, France", 48.8566, 2.3522, "fr"),
     "spain": ("Barcelona", "Barcelona, Spain", 41.3874, 2.1686, "es"),
+    "portugal": ("Lisbon", "Lisbon, Portugal", 38.7223, -9.1393, "pt"),
+    "germany": ("Munich", "Munich & Bavaria, Germany", 48.1351, 11.5820, "de"),
+    "austria": ("Vienna", "Vienna, Austria", 48.2082, 16.3738, "at"),
+    "netherlands": ("Amsterdam", "Amsterdam, Netherlands", 52.3676, 4.9041, "nl"),
     "greece": ("Athens", "Athens, Greece", 37.9838, 23.7275, "gr"),
     "uk": ("London", "London, United Kingdom", 51.5072, -0.1276, "gb"),
     "united kingdom": ("London", "London, United Kingdom", 51.5072, -0.1276, "gb"),
+    "usa": ("New York", "New York City, USA", 40.7128, -74.0060, "us"),
+    "united states": ("New York", "New York City, USA", 40.7128, -74.0060, "us"),
+    "canada": ("Toronto", "Toronto, Canada", 43.6532, -79.3832, "ca"),
     "australia": ("Sydney", "Sydney, Australia", -33.8688, 151.2093, "au"),
+    "new zealand": ("Auckland", "Auckland, New Zealand", -36.8485, 174.7633, "nz"),
+    # Key Indian island & mountain regions
+    "andaman": ("Port Blair", "Port Blair & Havelock, Andaman Islands", 11.6234, 92.7265, "in"),
+    "andaman and nicobar": ("Port Blair", "Port Blair & Havelock, Andaman Islands", 11.6234, 92.7265, "in"),
+    "lakshadweep": ("Agatti", "Agatti Island, Lakshadweep", 10.8532, 72.1945, "in"),
+    "ladakh": ("Leh", "Leh, Ladakh", 34.1526, 77.5771, "in"),
+    "kashmir": ("Srinagar", "Srinagar & Gulmarg, Kashmir", 34.0837, 74.7973, "in"),
+    "himachal": ("Manali", "Manali & Kullu Valley, Himachal Pradesh", 32.2432, 77.1892, "in"),
+    "himachal pradesh": ("Manali", "Manali & Kullu Valley, Himachal Pradesh", 32.2432, 77.1892, "in"),
+    "uttarakhand": ("Nainital", "Nainital & Kumaon Hills, Uttarakhand", 29.3919, 79.4542, "in"),
+    "kumaon": ("Nainital", "Nainital & Mukteshwar, Kumaon", 29.3919, 79.4542, "in"),
+    "kerala": ("Munnar", "Munnar & High Range, Kerala", 10.0889, 77.0595, "in"),
+    "rajasthan": ("Udaipur", "Udaipur, Rajasthan", 24.5854, 73.7125, "in"),
+    "sikkim": ("Gangtok", "Gangtok, Sikkim", 27.3389, 88.6065, "in"),
+    "meghalaya": ("Shillong", "Shillong & Cherrapunji, Meghalaya", 25.5788, 91.8933, "in"),
+    "north goa": ("Assagao", "Assagao & Vagator, North Goa", 15.5939, 73.7867, "in"),
+    "south goa": ("Benaulim", "Benaulim & Cavelossim, South Goa", 15.2528, 73.9242, "in"),
 }
 
 # Offline coordinate fallback index used ONLY when outbound network/Nominatim is unreachable
@@ -207,6 +267,49 @@ def nearest_airports(
     scored.sort(key=lambda item: item[1])
     within = [item for item in scored if item[1] <= max_km]
     return (within or scored[:1])[:limit]
+
+
+_CONTINENT_GROUPS = [
+    {"in", "np", "bt"},
+    {"th", "my", "sg", "vn", "kh"},
+    {"ae", "qa", "om", "sa"},
+    {"fr", "it", "es", "pt", "de", "at", "ch", "nl", "be", "gr", "tr", "hr", "cz", "pl"},
+    {"us", "ca", "mx"},
+]
+
+_ISLAND_COUNTRIES = {"id", "lk", "mv", "mu", "sc", "jp", "ph", "au", "nz", "gb", "is", "tw"}
+_INDIA_ISLAND_TOKENS = ("port blair", "havelock", "andaman", "nicobar", "agatti", "lakshadweep", "kavaratti")
+
+
+def is_overland_drivable(origin: GeoLocation, dest: GeoLocation) -> bool:
+    """Checks whether two resolved locations can realistically be driven overland by car."""
+    o_low = f"{origin.query} {origin.short_name} {origin.display_name}".lower()
+    d_low = f"{dest.query} {dest.short_name} {dest.display_name}".lower()
+    dist_km = haversine_km(origin.lat, origin.lng, dest.lat, dest.lng)
+
+    # Island territories within India (Andaman / Lakshadweep) vs mainland
+    o_island_in = any(tok in o_low for tok in _INDIA_ISLAND_TOKENS)
+    d_island_in = any(tok in d_low for tok in _INDIA_ISLAND_TOKENS)
+    if (o_island_in or d_island_in) and dist_km > 180.0:
+        return False
+
+    c1 = (origin.country_code or "in").lower()
+    c2 = (dest.country_code or "in").lower()
+
+    if c1 == c2:
+        # Indonesian/Philippine/Japanese inter-island hops > 450 km frequently cross open sea
+        if c1 in {"id", "ph", "mv", "sc"} and dist_km > 450.0:
+            return False
+        return True
+
+    if c1 in _ISLAND_COUNTRIES or c2 in _ISLAND_COUNTRIES:
+        return False
+
+    for grp in _CONTINENT_GROUPS:
+        if c1 in grp and c2 in grp:
+            return dist_km <= 2800.0
+
+    return False
 
 
 async def geocode_place(query: str) -> GeoLocation:
@@ -350,8 +453,9 @@ async def route_leg(
     from_loc: GeoLocation,
     to_loc: GeoLocation,
     vehicle_name: str,
+    transport_mode: str = "road",
 ) -> Tuple[RoadSegment, str]:
-    """Routes a driving leg via Project OSRM live highway geometry (SQLite cached), falling back to geodesic."""
+    """Routes a driving or airport-transfer leg via Project OSRM live highway geometry (SQLite cached)."""
     clearance_mm, km_per_l, fuel_price = parse_vehicle_profile(vehicle_name)
     cache_key = f"osrm_leg:v3:{round(from_loc.lat, 3)},{round(from_loc.lng, 3)}->{round(to_loc.lat, 3)},{round(to_loc.lng, 3)}"
 
@@ -433,18 +537,25 @@ async def route_leg(
         duration_mins = max(25, int(round((distance_km / 52.0) * 60)))
         coords = _curved_great_circle_path(from_loc.lng, from_loc.lat, to_loc.lng, to_loc.lat)
 
-    highway_label = (
-        f"Via {' -> '.join(highway_refs[:4])}"
-        if highway_refs
-        else f"Primary Highway Corridor ({from_loc.short_name} -> {to_loc.short_name})"
-    )
-
-    liters = distance_km / max(1.0, km_per_l)
-    fuel_inr = int(round(liters * fuel_price))
-
-    has_express_or_nh = any(r.upper().startswith(("NH", "NE", "AH", "I-", "E", "A")) for r in highway_refs)
-    toll_rate_per_km = 2.15 if has_express_or_nh else (1.35 if distance_km > 90 else 0.0)
-    toll_inr = int(round(distance_km * toll_rate_per_km))
+    if transport_mode == "flight":
+        highway_label = (
+            f"Private Airport / Local Transfer ({' -> '.join(highway_refs[:3])})"
+            if highway_refs
+            else f"Private Airport / Local Transfer ({from_loc.short_name} -> {to_loc.short_name})"
+        )
+        fuel_inr = 0
+        toll_inr = 0
+    else:
+        highway_label = (
+            f"Via {' -> '.join(highway_refs[:4])}"
+            if highway_refs
+            else f"Primary Highway Corridor ({from_loc.short_name} -> {to_loc.short_name})"
+        )
+        liters = distance_km / max(1.0, km_per_l)
+        fuel_inr = int(round(liters * fuel_price))
+        has_express_or_nh = any(r.upper().startswith(("NH", "NE", "AH", "I-", "E", "A")) for r in highway_refs)
+        toll_rate_per_km = 2.15 if has_express_or_nh else (1.35 if distance_km > 90 else 0.0)
+        toll_inr = int(round(distance_km * toll_rate_per_km))
 
     gate_alert: Optional[str] = None
     if corridor_alerts:
@@ -452,7 +563,7 @@ async def route_leg(
             f"Traverses {', '.join(corridor_alerts[:2])} — daytime forest/ghat checkpost window "
             f"(06:00–21:00) enforced by VRPTW solver ({clearance_mm}mm clearance verified)."
         )
-    elif duration_mins > 210:
+    elif duration_mins > 210 and transport_mode != "flight":
         gate_alert = "3.5h+ highway stretch — 30-min family meal/fuel break inserted to cap driver fatigue."
 
     return (

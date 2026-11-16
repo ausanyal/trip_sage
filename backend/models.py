@@ -112,6 +112,9 @@ class FlightOption(BaseModel):
     depart_time: str
     arrive_time: str
     duration: str
+    return_depart_time: Optional[str] = None
+    return_arrive_time: Optional[str] = None
+    return_duration: Optional[str] = None
     stops_label: str
     landed_family_total_inr: int
     ota_unoptimized_inr: int

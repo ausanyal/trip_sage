@@ -20,6 +20,7 @@ from models import (
     ToolCallTrace,
     TripSpec,
 )
+from providers.geo_routing import COUNTRY_VISITOR_GATEWAYS, OFFLINE_GAZETTEER, haversine_km
 from solver.pareto_dag import PhaseEmitter, solve_trip_pareto
 
 _ROOT_ENV = Path(__file__).resolve().parent.parent / ".env"
@@ -136,8 +137,24 @@ def _clean_place_phrase(raw: str) -> str:
     return " ".join(w.capitalize() if w.islower() else w for w in cleaned.split())
 
 
+_MONTH_MAP: Dict[str, int] = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
+
+
 def _parse_date_token(token: str, default_year: int) -> Optional[dt.date]:
-    token = token.strip()
+    token = token.strip(" .,;-")
     if re.match(r"^20\d{2}-\d{2}-\d{2}$", token):
         try:
             return dt.date.fromisoformat(token)
@@ -148,6 +165,28 @@ def _parse_date_token(token: str, default_year: int) -> Optional[dt.date]:
         yr = int(m.group(3)) if m.group(3) else default_year
         try:
             return dt.date(yr, int(m.group(1)), int(m.group(2)))
+        except ValueError:
+            return None
+    m_mon1 = re.match(
+        r"^([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s*,?\s*(20\d{2}))?$",
+        token,
+        flags=re.IGNORECASE,
+    )
+    if m_mon1 and m_mon1.group(1).lower() in _MONTH_MAP:
+        yr = int(m_mon1.group(3)) if m_mon1.group(3) else default_year
+        try:
+            return dt.date(yr, _MONTH_MAP[m_mon1.group(1).lower()], int(m_mon1.group(2)))
+        except ValueError:
+            return None
+    m_mon2 = re.match(
+        r"^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})(?:\s*,?\s*(20\d{2}))?$",
+        token,
+        flags=re.IGNORECASE,
+    )
+    if m_mon2 and m_mon2.group(2).lower() in _MONTH_MAP:
+        yr = int(m_mon2.group(3)) if m_mon2.group(3) else default_year
+        try:
+            return dt.date(yr, _MONTH_MAP[m_mon2.group(2).lower()], int(m_mon2.group(1)))
         except ValueError:
             return None
     return None
@@ -302,15 +341,38 @@ def _build_contextual_questions(
             + ", do you prefer **1 Deluxe Room + Extra Bed** (best value) or **2 Interconnecting Rooms**?"
         )
 
-    # 2. Destination Villa BHK & nightly budget ceiling if not explicitly given
-    has_explicit_budget = bool(re.search(r"\d+\s*(?:k|000)\b", lower))
+    # 2. Destination Villa BHK & nightly budget ceiling — ask ONLY what wasn't already specified
+    has_explicit_budget = bool(re.search(r"(?:\d+\s*(?:k|000)\b|[$€£]\s*\d{2,4})", lower))
     has_explicit_bhk = bool(re.search(r"\b\d\s*(?:bhk|br|bedroom)\b", lower))
-    if spec.stay_strategy in ("villas", "hybrid") and (not has_explicit_bhk or not has_explicit_budget):
-        questions.append(
-            f"**{dest_short} Villa Size & Budget:** Would you prefer a **2 BHK** or **3 BHK** private villa/Airbnb in {dest_short}, and what nightly budget range should I target (e.g., ₹15k–₹20k or ₹20k–₹30k/night)?"
+    cur_hint = (spec.currency or "").upper()
+    budget_examples = (
+        "$180–$260 or $260–$400/night"
+        if cur_hint == "USD"
+        else (
+            "€165–€240 or €240–€360/night"
+            if cur_hint == "EUR"
+            else (
+                "£140–£210 or £210–£320/night"
+                if cur_hint == "GBP"
+                else "₹15k–₹20k or ₹20k–₹30k/night"
+            )
         )
+    )
+    if spec.stay_strategy in ("villas", "hybrid"):
+        if not has_explicit_bhk and not has_explicit_budget:
+            questions.append(
+                f"**{dest_short} Villa Size & Budget:** Would you prefer a **2 BHK** or **3 BHK** private stay in {dest_short}, and what nightly budget range should I target (e.g., {budget_examples})?"
+            )
+        elif has_explicit_bhk and not has_explicit_budget:
+            questions.append(
+                f"**{dest_short} Nightly Budget:** For your **{spec.destination_villa_bhk} BHK/BR** private stay in {dest_short}, what nightly budget range should I target (e.g., {budget_examples})?"
+            )
+        elif has_explicit_budget and not has_explicit_bhk:
+            questions.append(
+                f"**{dest_short} Villa Size:** Within your nightly budget, would you prefer a **2 BHK** or **3 BHK** private stay in {dest_short}?"
+            )
 
-    # 3. Specific Car / SUV Model if road/hybrid and still generic
+    # 3. Specific Car / SUV Model if road trip and still generic
     known_car_named = any(
         k in lower
         for k in [
@@ -320,7 +382,7 @@ def _build_contextual_questions(
     )
     if spec.transport_mode == "road" and not known_car_named:
         questions.append(
-            "**Which Car Are You Driving?** Sharing your car/SUV model lets me calibrate exact highway fuel burn, FASTag tolls, and steep estate-road ground clearance."
+            "**Which Car Are You Driving?** Sharing your car/SUV model lets me calibrate exact highway fuel burn, tolls, and steep estate-road ground clearance."
         )
 
     # 4. Activity preferences if not specified
@@ -330,11 +392,16 @@ def _build_contextual_questions(
             f"**Activity Pacing & Interests:** Should I include or skip **(a) Wildlife Safaris**, **(b) Adventure / Water Activities**, **(c) Moderate Scenic Climbs**{stop_city_q}?"
         )
 
-    # 5. Rollout & return timing if not specified
+    # 5. Departure / Flight timing preference if not specified
     if not re.search(r"\b\d{1,2}\s*(?:am|pm)\b", lower) and "after lunch" not in lower and "morning" not in lower:
-        questions.append(
-            f"**Departure & Return Windows:** What time do you like rolling out from **{orig_short}** on {spec.start_date}, and when do you prefer starting your return legs?"
-        )
+        if spec.transport_mode in ("flight", "hybrid"):
+            questions.append(
+                f"**Flight Schedule & Cabin Preference:** For **{orig_short} -> {dest_short}**, do you prefer **morning non-stop / full-service flights** (with 25kg baggage & meals) or the **lowest-fare smart hub saver**?"
+            )
+        else:
+            questions.append(
+                f"**Departure & Return Windows:** What time do you like rolling out from **{orig_short}** on {spec.start_date}, and when do you prefer starting your return legs?"
+            )
 
     # Fallback core mode/stay questions if a terse 1-line destination prompt was given
     if not questions and not any(w in lower for w in ["road", "fly", "flight", "hybrid", "hotel", "villa", "airbnb"]):
@@ -419,10 +486,12 @@ def _deterministic_nlp_extract(
                 dest_switched = True
                 updates.append(f"Destination -> {cand_dest}")
 
-    # 2. Generic Date Range ("from MM/DD to MM/DD" or "YYYY-MM-DD to YYYY-MM-DD")
+    # 2. Generic Date Range ("from MM/DD to MM/DD", "Dec 21 to Dec 26", "YYYY-MM-DD to YYYY-MM-DD", or "for 5 days / 4 nights")
     yr = dt.date.today().year
+    dates_explicitly_set = False
     explicit_range = re.search(
-        r"\bfrom\s+(20\d{2}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/20\d{2})?)\s+to\s+(20\d{2}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/20\d{2})?)\b",
+        r"\b(?:from|between)\s+(20\d{2}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/20\d{2})?|[A-Za-z]{3,9}\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*,?\s*20\d{2})?|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]{3,9}(?:\s*,?\s*20\d{2})?)"
+        r"\s+(?:to|and|-|through)\s+(20\d{2}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/20\d{2})?|[A-Za-z]{3,9}\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*,?\s*20\d{2})?|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]{3,9}(?:\s*,?\s*20\d{2})?)\b",
         msg,
         flags=re.IGNORECASE,
     )
@@ -431,11 +500,13 @@ def _deterministic_nlp_extract(
         d2 = _parse_date_token(explicit_range.group(2), yr)
         if d1 and d2 and d2 > d1:
             spec.start_date, spec.end_date = d1.isoformat(), d2.isoformat()
+            dates_explicitly_set = True
             updates.append(f"Dates -> {spec.start_date} to {spec.end_date}")
-    else:
+    if not dates_explicitly_set:
         iso_dates = re.findall(r"\b(20\d{2}-\d{2}-\d{2})\b", msg)
         if len(iso_dates) >= 2:
             spec.start_date, spec.end_date = min(iso_dates), max(iso_dates)
+            dates_explicitly_set = True
             updates.append(f"Dates -> {spec.start_date} to {spec.end_date}")
         else:
             slash_tokens = re.findall(r"\b(\d{1,2}/\d{1,2}(?:/20\d{2})?)\b", msg)
@@ -444,7 +515,20 @@ def _deterministic_nlp_extract(
                 d_lo, d_hi = min(parsed_slash), max(parsed_slash)
                 if d_hi > d_lo:
                     spec.start_date, spec.end_date = d_lo.isoformat(), d_hi.isoformat()
+                    dates_explicitly_set = True
                     updates.append(f"Dates -> {spec.start_date} to {spec.end_date}")
+    if not dates_explicitly_set:
+        dur_m = re.search(r"\b(?:for\s+)?(\d{1,2})\s*[-\s]?(nights?|days?)\b", lower)
+        if dur_m:
+            num_val = max(1, min(14, int(dur_m.group(1))))
+            nights_val = num_val if "night" in dur_m.group(2) else max(1, num_val - 1)
+            try:
+                d0 = dt.date.fromisoformat(spec.start_date)
+            except ValueError:
+                d0 = dt.date.today() + dt.timedelta(days=14)
+                spec.start_date = d0.isoformat()
+            spec.end_date = (d0 + dt.timedelta(days=nights_val)).isoformat()
+            updates.append(f"Duration -> {nights_val} Nights ({spec.start_date} to {spec.end_date})")
 
     # 3. Party composition & Room setup (run BEFORE pinned stays so child count informs transit room config)
     ad_m = re.search(r"(\d+)\s*adults?", lower)
@@ -516,9 +600,38 @@ def _deterministic_nlp_extract(
         if spec.vehicle_name in ("Family SUV (Own Car)", "Self-Drive SUV"):
             spec.vehicle_name = "Airport Private Transfer SUV"
         updates.append("Transport Mode -> Fly + Stay")
-    elif any(p in lower for p in ["road trip", "own car", "pure road", "drive from"]):
+    elif any(p in lower for p in ["road trip", "own car", "pure road", "drive from", "driving from"]):
         spec.transport_mode = "road"
         updates.append("Transport Mode -> Pure Road Trip")
+    elif dest_switched:
+        # Auto-infer Fly + Stay when switching to an international, island, or >1,100 km destination without "road trip"
+        o_key = spec.origin.lower().split(",")[0].strip()
+        d_key = spec.destination.lower().split(",")[0].strip()
+        d_full = spec.destination.lower().strip()
+        o_cc = (
+            COUNTRY_VISITOR_GATEWAYS[o_key][4]
+            if o_key in COUNTRY_VISITOR_GATEWAYS
+            else (OFFLINE_GAZETTEER[o_key][2] if o_key in OFFLINE_GAZETTEER else "in")
+        )
+        d_cc = (
+            COUNTRY_VISITOR_GATEWAYS[d_full][4]
+            if d_full in COUNTRY_VISITOR_GATEWAYS
+            else (
+                COUNTRY_VISITOR_GATEWAYS[d_key][4]
+                if d_key in COUNTRY_VISITOR_GATEWAYS
+                else (OFFLINE_GAZETTEER[d_key][2] if d_key in OFFLINE_GAZETTEER else o_cc)
+            )
+        )
+        island_hit = any(tok in d_full for tok in ("andaman", "port blair", "havelock", "lakshadweep", "agatti", "bali", "maldives"))
+        long_haul = False
+        if o_key in OFFLINE_GAZETTEER and d_key in OFFLINE_GAZETTEER:
+            olat, olng, _ = OFFLINE_GAZETTEER[o_key]
+            dlat, dlng, _ = OFFLINE_GAZETTEER[d_key]
+            long_haul = haversine_km(olat, olng, dlat, dlng) > 1100.0
+        if o_cc != d_cc or island_hit or long_haul:
+            spec.transport_mode = "flight"
+            spec.vehicle_name = "Airport Private Transfer SUV"
+            updates.append("Transport Mode -> Fly + Stay")
 
     # 7. Stay Strategy (couples transit hotel anchors + destination villa/Airbnb into `"hybrid"`)
     wants_dest_villa = any(
@@ -533,6 +646,7 @@ def _deterministic_nlp_extract(
             "bluekite",
             "prefer villa",
             "bhk",
+            "br villa",
         ]
     )
     if any(p in lower for p in ["hotels only", "only hotel", "switch to hotel", "resorts only"]):
@@ -543,7 +657,7 @@ def _deterministic_nlp_extract(
         updates.append("Stay Strategy -> Hybrid (Transit Hotel + Destination Villa)")
     elif wants_dest_villa and not spec.pinned_stays:
         spec.stay_strategy = "villas"
-        updates.append("Stay Strategy -> Villas (Airbnb / The Blue Kite)")
+        updates.append("Stay Strategy -> Private Villas & Homes")
 
     # 8. Villa BHK & Nightly Budget
     bhk_m = re.search(r"(\d)\s*(?:bhk|br|bedroom)", lower)

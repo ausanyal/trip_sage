@@ -130,53 +130,6 @@ function buildWelcomeConversation(): ChatMessage[] {
   ];
 }
 
-function buildInitialWayanadConversation(
-  wayanadData: OptimizationResponse
-): ChatMessage[] {
-  return [
-    {
-      id: "turn-1",
-      role: "user",
-      timestamp: "7:48 PM",
-      content:
-        "I want to plan a road trip with my family of 4 (2 adults and 2 kids of age 8 and 10) from Koramangala, Bangalore to Wayanad, Kerala from 12/21 to 12/26.\nOn our way we want to stay at Radisson, Mysore on 12/21 and on our way back again on 12/25, returning 12/26. In Wayanad we prefer Airbnb over hotel, eat both veg & non-veg, ok with high-end stays, and have our own car.",
-    },
-    {
-      id: "turn-2",
-      role: "assistant",
-      timestamp: "7:49 PM",
-      extracted_updates: [
-        "Mode -> Pure Road Trip (Own Car)",
-        "Stays -> Hybrid (Radisson Mysore + Wayanad Villa)",
-        "Party -> 2A + 2C (Ages 8 & 10)",
-      ],
-      content:
-        "Hydrated your family road trip and verified Radisson Mysore's southern NH766 exit + age-10 child cutoff. Quick 5 questions before running live channel arbitrage:\n1. Radisson room setup?\n2. Wayanad BHK & nightly target?\n3. Which car are you driving?\n4. Kids' mix: Safaris, Water/Ziplines, Moderate Climbs, Mysuru stops?\n5. Departure & return windows?",
-    },
-    {
-      id: "turn-3",
-      role: "user",
-      timestamp: "8:04 PM",
-      content:
-        "1. Deluxe Room + extra bed · 2. 2 BHK, within 15-20k/night · 3. Jeep Meridian SUV · 4. Safari: No, Adventure/Water: No, Moderate Climbs: Yes, Mysuru Stops: No · 5. Leave Koramangala 2pm; leave Wayanad early afternoon; leave Mysore after lunch.",
-    },
-    {
-      id: "turn-4",
-      role: "assistant",
-      timestamp: "8:05 PM",
-      extracted_updates: [
-        "Vehicle -> Jeep Meridian SUV (203mm)",
-        "Villa -> 2 BHK (₹15k–₹20k/N)",
-        "Climbs -> ON · Safaris/Water/Mysuru -> OFF",
-        "Rollout -> 2:00 PM Koramangala",
-      ],
-      tool_trace: wayanadData.tool_trace,
-      content:
-        "Completed all 3 planner phases! Generated 3 Pareto-optimal blueprints.\n\nTop pick: The Sattva Grove (StayVista Direct) + Radisson Mysore split-channel booking at ₹86,400 core all-in — saving ₹12,237 vs. unoptimized OTA/Airbnb checkout fees AND dodging ~₹15,000 in mandatory Dec 24 5-star Christmas Eve Gala surcharges.",
-    },
-  ];
-}
-
 const CONFIGURED_API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "").replace(
   /\/+$/,
   ""
@@ -823,43 +776,17 @@ export default function TripSageWorkspacePage() {
         );
         return;
       }
-      const data =
-        exampleKey === "wayanad" ? INITIAL_PRESETS.wayanad : INITIAL_PRESETS.goa;
-      const sampleMsgs: ChatMessage[] =
-        exampleKey === "wayanad"
-          ? buildInitialWayanadConversation(INITIAL_PRESETS.wayanad)
-          : [
-              {
-                id: "goa-1",
-                role: "user",
-                timestamp: "Sample",
-                content:
-                  "Show me a Hybrid Fly + Drive family trip from Bangalore to North Goa staying in a Blue Kite private pool villa.",
-              },
-              {
-                id: "goa-2",
-                role: "assistant",
-                timestamp: "Sample",
-                extracted_updates: [
-                  "Mode -> Hybrid (Fly BLR->GOX + Rental SUV)",
-                  "Stay -> The Blue Kite Direct (Assagao)",
-                ],
-                tool_trace: data.tool_trace,
-                content:
-                  "Matched La Soria by The Blue Kite (3 BHK Pool Villa, Assagao) across thebluekite.com, MakeMyTrip, and Airbnb — booking direct saves ₹16,400 over Airbnb's service fee! Plus flying into Mopa (GOX) instead of Dabolim (GOI) saves ₹6,200 and cuts your drive to Assagao to 28 mins.",
-              },
-            ];
-      setOptimization(data);
-      setCurrency("INR");
-      setSelectedBlueprintIdx(0);
-      setSelectedFlightIdx(0);
-      setActiveDay(null);
-      setMessages(sampleMsgs);
-      setHasActiveTrip(true);
-      window.history.replaceState(null, "", "/");
-      saveRecentTripToBrowser(data, sampleMsgs);
+      if (exampleKey === "goa") {
+        void handleSendMessage(
+          "Plan a hybrid fly and drive trip from Bangalore to North Goa in a 3 BHK villa with 2 adults and 2 kids"
+        );
+        return;
+      }
+      void handleSendMessage(
+        "Plan a road trip with my family of 4 (2 adults and 2 kids of age 8 and 10) from Koramangala, Bangalore to Wayanad, Kerala from 12/21 to 12/26, stay at Radisson, Mysore on 12/21 and on our way back on 12/25, prefer Airbnb in a 2 BHK within 15-20k driving a Jeep Meridian SUV"
+      );
     },
-    [handleSendMessage, saveRecentTripToBrowser]
+    [handleSendMessage]
   );
 
   // Accessible keyboard arrow navigation for ARIA tabs
@@ -970,9 +897,16 @@ export default function TripSageWorkspacePage() {
                       {flt.carrier}
                     </span>
                     <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--route-blue)" }}>
-                      {routeShort} · {flt.depart_time} – {flt.arrive_time} ({flt.duration})
+                      Out ({routeShort}): {flt.depart_time} – {flt.arrive_time} ({flt.duration})
                     </span>
-                    <span style={{ fontSize: "0.74rem", color: "var(--text-muted)" }}>
+                    {flt.return_depart_time && flt.return_arrive_time && (
+                      <span style={{ fontSize: "0.76rem", fontWeight: 600, color: "var(--text-secondary)" }}>
+                        Ret ({flt.dest_iata && flt.origin_iata ? `${flt.dest_iata} → ${flt.origin_iata}` : "Return"}):{" "}
+                        {flt.return_depart_time} – {flt.return_arrive_time}
+                        {flt.return_duration ? ` (${flt.return_duration})` : ""}
+                      </span>
+                    )}
+                    <span style={{ fontSize: "0.73rem", color: "var(--text-muted)" }}>
                       {flt.stops_label} · {flt.flight_numbers}
                     </span>
                   </span>
@@ -1057,6 +991,32 @@ export default function TripSageWorkspacePage() {
       </ul>
     );
   };
+
+  const isIntlVillas = optimization.platform_coverage.some(
+    (pc) => pc.platform.includes("Plum Guide") || pc.platform.includes("Vrbo")
+  );
+
+  // Deduplicated list of all stays across active blueprint + alternative Pareto blueprints
+  const allArbitrageStays = React.useMemo(() => {
+    const items: Array<{ stay: StayCandidate; blueprintIdx: number; isActiveLeg: boolean }> = [];
+    const seenNames = new Set<string>();
+    for (const s of blueprint.stays) {
+      const key = `${s.name.toLowerCase()}::${s.check_in}`;
+      seenNames.add(key);
+      items.push({ stay: s, blueprintIdx: selectedBlueprintIdx, isActiveLeg: true });
+    }
+    optimization.blueprints.forEach((bp, bpIdx) => {
+      if (bpIdx === selectedBlueprintIdx) return;
+      for (const s of bp.stays) {
+        const key = `${s.name.toLowerCase()}::${s.check_in}`;
+        if (!seenNames.has(key)) {
+          seenNames.add(key);
+          items.push({ stay: s, blueprintIdx: bpIdx, isActiveLeg: false });
+        }
+      }
+    });
+    return items;
+  }, [blueprint.stays, optimization.blueprints, selectedBlueprintIdx]);
 
   const stopCategoryIcon = (cat: TimelineStop["category"]) => {
     switch (cat) {
@@ -1284,13 +1244,17 @@ export default function TripSageWorkspacePage() {
                   {optimization.trip_spec.stay_strategy === "hybrid"
                     ? `Hybrid Stays (Hotel + ${optimization.trip_spec.destination_villa_bhk}BHK Villa)`
                     : optimization.trip_spec.stay_strategy === "villas"
-                    ? "Villas (Airbnb / The Blue Kite)"
+                    ? isIntlVillas
+                      ? "Private Villas (Airbnb / Plum Guide / Vrbo)"
+                      : "Villas (Airbnb / The Blue Kite / StayVista)"
                     : "Hotels & Resorts"}
                 </span>
                 <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600 }}>
                   {optimization.trip_spec.start_date} to {optimization.trip_spec.end_date} ·{" "}
-                  {optimization.trip_spec.party.adults} Adults +{" "}
-                  {optimization.trip_spec.party.children} Kids
+                  {optimization.trip_spec.party.adults}{" "}
+                  {optimization.trip_spec.party.adults === 1 ? "Adult" : "Adults"} +{" "}
+                  {optimization.trip_spec.party.children}{" "}
+                  {optimization.trip_spec.party.children === 1 ? "Kid" : "Kids"}
                   {optimization.trip_spec.party.child_ages.length > 0
                     ? ` (${optimization.trip_spec.party.child_ages.join(", ")} yrs)`
                     : ""}
@@ -1314,7 +1278,9 @@ export default function TripSageWorkspacePage() {
                 <span>{optimization.trip_spec.destination}</span>
               </h2>
               <p style={{ margin: 0, fontSize: "0.83rem", color: "var(--text-secondary)" }}>
-                Vehicle: <strong>{optimization.trip_spec.vehicle_name}</strong> · Rollout:{" "}
+                {optimization.trip_spec.transport_mode === "flight" ? "Transfers" : "Vehicle"}:{" "}
+                <strong>{optimization.trip_spec.vehicle_name}</strong> ·{" "}
+                {optimization.trip_spec.transport_mode === "flight" ? "Schedule" : "Rollout"}:{" "}
                 <strong>{optimization.trip_spec.departure_time_pref}</strong> · Dietary:{" "}
                 <strong>
                   {optimization.trip_spec.activities.dietary === "both"
@@ -1338,7 +1304,9 @@ export default function TripSageWorkspacePage() {
             >
               <div>
                 <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 700 }}>
-                  CORE ALL-IN ({currency} · STAYS + ROAD{blueprint.flights.length ? " + FLIGHTS" : ""})
+                  CORE ALL-IN ({currency} · STAYS +{" "}
+                  {optimization.trip_spec.transport_mode === "flight" ? "TRANSFERS" : "ROAD"}
+                  {blueprint.flights.length ? " + FLIGHTS" : ""})
                 </div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
                   <span style={{ fontSize: "1.45rem", fontWeight: 900, color: "var(--accent-primary)" }}>
@@ -1375,6 +1343,7 @@ export default function TripSageWorkspacePage() {
                 spec={optimization.trip_spec}
                 currency={currency}
                 fxRates={fxRates}
+                isPlanning={isPlanning}
                 onUpdateSpec={handleUpdateSpec}
               />
             )}
@@ -1615,10 +1584,17 @@ export default function TripSageWorkspacePage() {
                   [
                     "arbitrage",
                     blueprint.flights.length > 0
-                      ? `Flight & Stay Arbitrage (${blueprint.flights.length} Flights · ${blueprint.stays.length} Stays)`
-                      : `Cross-Channel Stay Arbitrage (${blueprint.stays.length} Stays)`,
+                      ? `Flight & Stay Arbitrage (${blueprint.flights.length} Flights · ${allArbitrageStays.length} ${allArbitrageStays.length === 1 ? "Stay" : "Stays"})`
+                      : `Cross-Channel Stay Arbitrage (${allArbitrageStays.length} ${allArbitrageStays.length === 1 ? "Stay" : "Stays"})`,
                   ],
-                  ["telemetry", `${optimization.trip_spec.vehicle_name.split("(")[0].trim()} Road, Tolls & Gates`],
+                  [
+                    "telemetry",
+                    optimization.trip_spec.transport_mode === "flight"
+                      ? "Transfers & Ground Logistics"
+                      : optimization.trip_spec.transport_mode === "hybrid"
+                      ? "Rental SUV, Fuel & Tolls"
+                      : `${optimization.trip_spec.vehicle_name.split("(")[0].trim()} Road, Tolls & Gates`,
+                  ],
                 ] as const
               ).map(([tabKey, label], idx) => {
                 const selected = activeTab === tabKey;
@@ -1774,7 +1750,44 @@ export default function TripSageWorkspacePage() {
                             gap: "0.8rem",
                           }}
                         >
-                          {visibleStops.map((st) => (
+                          {visibleStops.map((st) => {
+                            const isDay1Flight =
+                              st.category === "flight" &&
+                              day.day_number === 1 &&
+                              activeFlight !== null;
+                            const isReturnFlight =
+                              st.category === "flight" &&
+                              day.day_number === blueprint.days.length &&
+                              activeFlight !== null;
+
+                            const stopTitle = isDay1Flight
+                              ? `Outbound Flight (${activeFlight.origin_iata ?? shortCityName(optimization.trip_spec.origin)} → ${activeFlight.dest_iata ?? shortCityName(optimization.trip_spec.destination)}) + Arrival Transfer`
+                              : isReturnFlight
+                              ? `Airport Transfer + Return Flight (${activeFlight.dest_iata ?? shortCityName(optimization.trip_spec.destination)} → ${activeFlight.origin_iata ?? shortCityName(optimization.trip_spec.origin)})`
+                              : st.title;
+
+                            const stopTimeWindow = isDay1Flight
+                              ? `${activeFlight.depart_time} – ${activeFlight.arrive_time}`
+                              : isReturnFlight && activeFlight.return_depart_time && activeFlight.return_arrive_time
+                              ? `${activeFlight.return_depart_time} – ${activeFlight.return_arrive_time}`
+                              : st.time_window;
+
+                            const stopDurationLabel = isDay1Flight
+                              ? `${activeFlight.duration} flight + transfer`
+                              : isReturnFlight && activeFlight.return_duration
+                              ? `transfer + ${activeFlight.return_duration} flight`
+                              : st.duration_label;
+
+                            const stopLocationLabel =
+                              (isDay1Flight || isReturnFlight) && activeFlight
+                                ? `${activeFlight.carrier} (${activeFlight.stops_label}) · ${activeFlight.flight_numbers}`
+                                : st.location_label;
+
+                            const stopTip = isDay1Flight && activeFlight
+                              ? activeFlight.gateway_hub_note
+                              : st.insider_tip;
+
+                            return (
                             <li
                               key={st.id}
                               style={{
@@ -1798,22 +1811,22 @@ export default function TripSageWorkspacePage() {
                               >
                                 <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", fontWeight: 800, fontSize: "0.92rem" }}>
                                   {stopCategoryIcon(st.category)}
-                                  <span>{st.title}</span>
+                                  <span>{stopTitle}</span>
                                 </div>
                                 <span style={{ fontSize: "0.76rem", fontWeight: 700, color: "var(--route-blue)" }}>
-                                  {st.time_window} ({st.duration_label})
+                                  {stopTimeWindow} ({stopDurationLabel})
                                 </span>
                               </div>
 
                               <div style={{ fontSize: "0.76rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.3rem" }}>
-                                <MapPin size={12} aria-hidden="true" /> {st.location_label}
+                                <MapPin size={12} aria-hidden="true" /> {stopLocationLabel}
                               </div>
 
                               <p style={{ margin: "0.15rem 0 0", fontSize: "0.84rem", color: "var(--text-secondary)" }}>
                                 {st.description}
                               </p>
 
-                              {(st.dietary_note || st.kid_note || st.insider_tip) && (
+                              {(st.dietary_note || st.kid_note || stopTip) && (
                                 <div
                                   style={{
                                     display: "flex",
@@ -1833,15 +1846,16 @@ export default function TripSageWorkspacePage() {
                                       Family Fit: {st.kid_note}
                                     </span>
                                   )}
-                                  {st.insider_tip && (
+                                  {stopTip && (
                                     <span className="badge badge-route">
-                                      Tip: {st.insider_tip}
+                                      Tip: {stopTip}
                                     </span>
                                   )}
                                 </div>
                               )}
                             </li>
-                          ))}
+                            );
+                          })}
                         </ul>
                       </li>
                     );
@@ -1907,7 +1921,7 @@ export default function TripSageWorkspacePage() {
               )}
 
               <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                {blueprint.stays.map((stay) => {
+                {allArbitrageStays.map(({ stay, blueprintIdx, isActiveLeg }) => {
                   const prov = stay.price_provenance ?? "estimated_benchmark";
                   const shortProv =
                     prov === "live_verified"
@@ -1917,8 +1931,15 @@ export default function TripSageWorkspacePage() {
                       : "Benchmark Estimate";
 
                   return (
-                    <div key={stay.id} className="card-container">
-                      <article className="stay-arbitrage-card">
+                    <div key={`${stay.id}-bp${blueprintIdx}`} className="card-container">
+                      <article
+                        className="stay-arbitrage-card"
+                        style={
+                          isActiveLeg
+                            ? { borderColor: "var(--accent-primary)" }
+                            : undefined
+                        }
+                      >
                         <img
                           src={stay.image_url}
                           alt={`${stay.name} in ${stay.city}`}
@@ -1930,6 +1951,15 @@ export default function TripSageWorkspacePage() {
 
                         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "0.45rem" }}>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", alignItems: "center" }}>
+                            {isActiveLeg ? (
+                              <span className="badge badge-emerald">
+                                <CheckCircle2 size={12} aria-hidden="true" /> Selected in Active Itinerary
+                              </span>
+                            ) : (
+                              <span className="badge badge-route">
+                                Alternative Pareto Option #{blueprintIdx + 1}
+                              </span>
+                            )}
                             <span className="badge badge-emerald">
                               <Sparkles size={12} aria-hidden="true" />{" "}
                               {stay.savings_inr > 0
@@ -2003,7 +2033,16 @@ export default function TripSageWorkspacePage() {
                               </div>
                             </div>
 
-                            <div style={{ display: "flex", gap: "0.5rem" }}>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                              {!isActiveLeg && (
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  onClick={() => setSelectedBlueprintIdx(blueprintIdx)}
+                                >
+                                  Select Stay Blueprint
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 className="btn btn-primary"
@@ -2017,6 +2056,7 @@ export default function TripSageWorkspacePage() {
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="btn"
+                                aria-label={`Verify ${stay.name} on ${stay.best_channel}`}
                                 style={{ textDecoration: "none" }}
                               >
                                 Portal <ExternalLink size={14} aria-hidden="true" />
@@ -2031,7 +2071,7 @@ export default function TripSageWorkspacePage() {
               </div>
             </div>
 
-            {/* TAB PANEL 3: VEHICLE TELEMETRY, FUEL, TOLLS & CHECKPOST RULES */}
+            {/* TAB PANEL 3: MODE-AWARE TRANSFERS / RENTAL / ROAD TELEMETRY */}
             <div
               role="tabpanel"
               id="panel-telemetry"
@@ -2046,48 +2086,96 @@ export default function TripSageWorkspacePage() {
                   marginBlockEnd: "1rem",
                 }}
               >
-                <div style={{ padding: "0.9rem", borderRadius: "0.8rem", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}>
-                  <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", fontWeight: 700 }}>VEHICLE &amp; CLEARANCE</div>
-                  <div style={{ fontSize: "1rem", fontWeight: 800, marginBlockStart: "0.2rem" }}>{blueprint.road.vehicle}</div>
-                  <div style={{ fontSize: "0.78rem", color: "var(--accent-primary)", fontWeight: 600 }}>
-                    {blueprint.road.ground_clearance_mm}mm Estate Clearance Verified
-                  </div>
-                </div>
+                {optimization.trip_spec.transport_mode === "flight" ? (
+                  <>
+                    <div style={{ padding: "0.9rem", borderRadius: "0.8rem", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}>
+                      <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", fontWeight: 700 }}>TRANSFER SETUP</div>
+                      <div style={{ fontSize: "1rem", fontWeight: 800, marginBlockStart: "0.2rem" }}>{blueprint.road.vehicle}</div>
+                      <div style={{ fontSize: "0.78rem", color: "var(--accent-primary)", fontWeight: 600 }}>
+                        Airport Pickup/Drop + Daily Sightseeing Cabs
+                      </div>
+                    </div>
 
-                <div style={{ padding: "0.9rem", borderRadius: "0.8rem", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}>
-                  <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", fontWeight: 700 }}>FUEL ESTIMATE ({currency})</div>
-                  <div style={{ fontSize: "1.15rem", fontWeight: 800, marginBlockStart: "0.2rem" }}>
-                    {money(blueprint.road.fuel_cost_inr)}
-                  </div>
-                  <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                    <Fuel size={12} aria-hidden="true" style={{ display: "inline", marginInlineEnd: 4 }} />
-                    ~{blueprint.road.estimated_fuel_liters}L across {blueprint.road.total_distance_km} km
-                  </div>
-                </div>
+                    <div style={{ padding: "0.9rem", borderRadius: "0.8rem", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}>
+                      <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", fontWeight: 700 }}>LOCAL GROUND DISTANCE</div>
+                      <div style={{ fontSize: "1.15rem", fontWeight: 800, marginBlockStart: "0.2rem" }}>
+                        {blueprint.road.total_distance_km} km
+                      </div>
+                      <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                        ~{blueprint.road.total_drive_hours}h total across {blueprint.days.length} days
+                      </div>
+                    </div>
 
-                <div style={{ padding: "0.9rem", borderRadius: "0.8rem", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}>
-                  <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", fontWeight: 700 }}>HIGHWAY TOLLS &amp; ENTRY</div>
-                  <div style={{ fontSize: "1.15rem", fontWeight: 800, marginBlockStart: "0.2rem" }}>
-                    {money(blueprint.road.fastag_and_forest_tolls_inr)}
-                  </div>
-                  <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                    {blueprint.road.segments[0]?.highway_label ?? "Highway & Corridor Plazas"}
-                  </div>
-                </div>
+                    <div style={{ padding: "0.9rem", borderRadius: "0.8rem", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}>
+                      <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", fontWeight: 700 }}>ALL-IN TRANSFERS ({currency})</div>
+                      <div style={{ fontSize: "1.15rem", fontWeight: 800, marginBlockStart: "0.2rem" }}>
+                        {money(blueprint.road.total_road_cost_inr)}
+                      </div>
+                      <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                        Driver, fuel, parking &amp; airport tolls included
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ padding: "0.9rem", borderRadius: "0.8rem", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}>
+                      <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", fontWeight: 700 }}>
+                        {optimization.trip_spec.transport_mode === "hybrid"
+                          ? `RENTAL SUV (${currency})`
+                          : "VEHICLE & CLEARANCE"}
+                      </div>
+                      <div style={{ fontSize: "1rem", fontWeight: 800, marginBlockStart: "0.2rem" }}>
+                        {optimization.trip_spec.transport_mode === "hybrid" && blueprint.road.rental_car_cost_inr > 0
+                          ? `${money(blueprint.road.rental_car_cost_inr)} · ${blueprint.road.vehicle}`
+                          : blueprint.road.vehicle}
+                      </div>
+                      <div style={{ fontSize: "0.78rem", color: "var(--accent-primary)", fontWeight: 600 }}>
+                        {blueprint.road.ground_clearance_mm}mm Clearance Verified
+                      </div>
+                    </div>
+
+                    <div style={{ padding: "0.9rem", borderRadius: "0.8rem", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}>
+                      <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", fontWeight: 700 }}>FUEL ESTIMATE ({currency})</div>
+                      <div style={{ fontSize: "1.15rem", fontWeight: 800, marginBlockStart: "0.2rem" }}>
+                        {money(blueprint.road.fuel_cost_inr)}
+                      </div>
+                      <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                        <Fuel size={12} aria-hidden="true" style={{ display: "inline", marginInlineEnd: 4 }} />
+                        ~{blueprint.road.estimated_fuel_liters}L across {blueprint.road.total_distance_km} km
+                      </div>
+                    </div>
+
+                    <div style={{ padding: "0.9rem", borderRadius: "0.8rem", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}>
+                      <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", fontWeight: 700 }}>HIGHWAY TOLLS &amp; ENTRY</div>
+                      <div style={{ fontSize: "1.15rem", fontWeight: 800, marginBlockStart: "0.2rem" }}>
+                        {money(blueprint.road.fastag_and_forest_tolls_inr)}
+                      </div>
+                      <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                        {blueprint.road.segments[0]?.highway_label ?? "Highway & Corridor Plazas"}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="table-scroll">
                 <table className="rate-table">
                   <caption>
-                    Corridor-by-Corridor Driving, Toll &amp; Checkpost Verification ({currency})
+                    {optimization.trip_spec.transport_mode === "flight"
+                      ? `Day-by-Day Airport & Local Sightseeing Transfers (${currency})`
+                      : `Corridor-by-Corridor Driving, Toll & Checkpost Verification (${currency})`}
                   </caption>
                   <thead>
                     <tr>
                       <th scope="col">Day</th>
-                      <th scope="col">Leg &amp; Highway</th>
+                      <th scope="col">Leg &amp; Corridor</th>
                       <th scope="col">Distance / Time</th>
-                      <th scope="col">Toll + Fuel</th>
-                      <th scope="col">Gate &amp; VRPTW Advisory</th>
+                      <th scope="col">
+                        {optimization.trip_spec.transport_mode === "flight"
+                          ? "Billing"
+                          : "Toll + Fuel"}
+                      </th>
+                      <th scope="col">Route &amp; VRPTW Verification</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2109,10 +2197,18 @@ export default function TripSageWorkspacePage() {
                           {seg.duration_mins % 60}m
                         </td>
                         <td>
-                          {money(seg.fastag_toll_inr + seg.fuel_estimate_inr)}
-                          <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
-                            Toll {money(seg.fastag_toll_inr)} · Fuel {money(seg.fuel_estimate_inr)}
-                          </div>
+                          {optimization.trip_spec.transport_mode === "flight" ? (
+                            <span style={{ fontSize: "0.78rem", color: "var(--accent-primary)", fontWeight: 700 }}>
+                              Included in Transfer Estimate
+                            </span>
+                          ) : (
+                            <>
+                              {money(seg.fastag_toll_inr + seg.fuel_estimate_inr)}
+                              <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
+                                Toll {money(seg.fastag_toll_inr)} · Fuel {money(seg.fuel_estimate_inr)}
+                              </div>
+                            </>
+                          )}
                         </td>
                         <td style={{ fontSize: "0.79rem" }}>
                           {seg.gate_alert ? (
@@ -2122,7 +2218,9 @@ export default function TripSageWorkspacePage() {
                           ) : (
                             <span style={{ color: "var(--accent-primary)" }}>
                               <ShieldCheck size={14} aria-hidden="true" style={{ display: "inline", marginInlineEnd: 4 }} />
-                              24×7 Access-Controlled Expressway
+                              {optimization.trip_spec.transport_mode === "flight"
+                                ? "Verified Paved Transfer Corridor"
+                                : "Open Multi-Lane Highway"}
                             </span>
                           )}
                         </td>

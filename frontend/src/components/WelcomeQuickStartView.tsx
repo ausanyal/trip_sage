@@ -32,6 +32,20 @@ interface WelcomeQuickStartViewProps {
   onTryExample: (exampleKey: "wayanad" | "goa" | "mahabaleshwar") => void;
 }
 
+const AUTO_FLIGHT_DEST_TOKENS = [
+  "indonesia", "bali", "thailand", "phuket", "bangkok", "singapore",
+  "malaysia", "kuala lumpur", "vietnam", "da nang", "hanoi", "cambodia",
+  "philippines", "sri lanka", "colombo", "maldives", "mauritius", "seychelles",
+  "dubai", "uae", "abu dhabi", "doha", "qatar", "turkey", "istanbul", "egypt",
+  "japan", "tokyo", "kyoto", "seoul", "south korea", "london", "uk", "paris",
+  "france", "rome", "italy", "amalfi", "zurich", "interlaken", "switzerland",
+  "spain", "barcelona", "portugal", "lisbon", "greece", "athens", "santorini",
+  "germany", "munich", "austria", "vienna", "amsterdam", "netherlands",
+  "new york", "usa", "united states", "san francisco", "los angeles", "toronto",
+  "canada", "sydney", "australia", "auckland", "new zealand",
+  "andaman", "port blair", "havelock", "lakshadweep", "agatti",
+];
+
 function addDaysIso(daysFromToday: number): string {
   const d = new Date();
   d.setDate(d.getDate() + daysFromToday);
@@ -73,6 +87,7 @@ export function WelcomeQuickStartView({
   const [startDate, setStartDate] = useState(defaultDates.start);
   const [endDate, setEndDate] = useState(defaultDates.end);
   const [transportMode, setTransportMode] = useState<TransportMode>("road");
+  const [userTouchedMode, setUserTouchedMode] = useState<boolean>(false);
   const [stayStrategy, setStayStrategy] = useState<StayStrategy>("villas");
   const [adults, setAdults] = useState(2);
   const [children, setChildren] = useState(2);
@@ -128,11 +143,20 @@ export function WelcomeQuickStartView({
       Math.min(14, 7 + i * 2)
     );
 
+    let safeEnd = endDate;
+    if (safeEnd <= startDate) {
+      const d = new Date(`${startDate}T00:00:00`);
+      if (!Number.isNaN(d.getTime())) {
+        d.setDate(d.getDate() + 4);
+        safeEnd = d.toISOString().slice(0, 10);
+      }
+    }
+
     const spec: TripSpec = {
       origin: safeOrigin,
       destination: safeDest,
       start_date: startDate,
-      end_date: endDate >= startDate ? endDate : startDate,
+      end_date: safeEnd,
       departure_time_pref: "08:30 AM Departure",
       return_timing_pref: "Post-Lunch Return",
       transport_mode: transportMode,
@@ -270,8 +294,17 @@ export function WelcomeQuickStartView({
                 enterKeyHint="next"
                 aria-errormessage={destErrId}
                 value={destination}
-                onChange={(e) => setDestination(e.target.value)}
-                placeholder="e.g., Coorg, North Goa, Sedona, Interlaken"
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setDestination(val);
+                  if (!userTouchedMode) {
+                    const low = val.trim().toLowerCase();
+                    if (AUTO_FLIGHT_DEST_TOKENS.some((tok) => low.includes(tok))) {
+                      setTransportMode("flight");
+                    }
+                  }
+                }}
+                placeholder="e.g., Coorg, North Goa, Bali, Sedona, Interlaken"
                 className="qs-input"
               />
               <div id={destErrId} className="qs-error-msg">
@@ -298,7 +331,17 @@ export function WelcomeQuickStartView({
                 name="start_date"
                 type="date"
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                onChange={(e) => {
+                  const nextS = e.target.value;
+                  setStartDate(nextS);
+                  if (nextS && endDate <= nextS) {
+                    const d = new Date(`${nextS}T00:00:00`);
+                    if (!Number.isNaN(d.getTime())) {
+                      d.setDate(d.getDate() + 4);
+                      setEndDate(d.toISOString().slice(0, 10));
+                    }
+                  }
+                }}
                 className="qs-input"
               />
             </div>
@@ -374,7 +417,10 @@ export function WelcomeQuickStartView({
                     name="transport_mode"
                     value="road"
                     checked={transportMode === "road"}
-                    onChange={() => setTransportMode("road")}
+                    onChange={() => {
+                      setUserTouchedMode(true);
+                      setTransportMode("road");
+                    }}
                   />
                   <Car size={15} aria-hidden="true" color="var(--route-blue)" />
                   <span>Pure Road Trip</span>
@@ -385,7 +431,10 @@ export function WelcomeQuickStartView({
                     name="transport_mode"
                     value="flight"
                     checked={transportMode === "flight"}
-                    onChange={() => setTransportMode("flight")}
+                    onChange={() => {
+                      setUserTouchedMode(true);
+                      setTransportMode("flight");
+                    }}
                   />
                   <Plane size={15} aria-hidden="true" color="var(--gold-accent)" />
                   <span>Fly + Stay</span>
@@ -396,7 +445,10 @@ export function WelcomeQuickStartView({
                     name="transport_mode"
                     value="hybrid"
                     checked={transportMode === "hybrid"}
-                    onChange={() => setTransportMode("hybrid")}
+                    onChange={() => {
+                      setUserTouchedMode(true);
+                      setTransportMode("hybrid");
+                    }}
                   />
                   <Compass size={15} aria-hidden="true" color="var(--accent-primary)" />
                   <span>Hybrid Fly + Drive</span>

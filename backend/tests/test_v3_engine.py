@@ -450,7 +450,7 @@ class TestTripSageV3Engine(unittest.IsolatedAsyncioTestCase):
             end_date="2026-12-25",
             party=TravelParty(adults=2, children=2, child_ages=[8, 10]),
         )
-        parsed_spec, updates, _ = _deterministic_nlp_extract(
+        parsed_spec, updates, questions = _deterministic_nlp_extract(
             ChatTurnRequest(
                 message="Plan a fly and stay trip from Bangalore to Indonesia in a 2 BHK villa",
                 current_spec=base_spec,
@@ -460,6 +460,8 @@ class TestTripSageV3Engine(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parsed_spec.origin, "Bangalore")
         self.assertEqual(parsed_spec.destination, "Indonesia")
         self.assertTrue(any("Fly + Stay" in u for u in updates))
+        # Must NOT re-ask "2 BHK or 3 BHK" since user already specified "2 BHK"
+        self.assertFalse(any("2 BHK** or **3 BHK" in q for q in questions))
 
         opt = await solve_trip_pareto(parsed_spec, persist_snapshot=False)
         top_bp = opt.blueprints[0]
@@ -469,17 +471,103 @@ class TestTripSageV3Engine(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(f0.dest_iata, "DPS")
         self.assertIsNotNone(f0.origin_lat)
         self.assertIsNotNone(f0.dest_lat)
-        self.assertTrue((f0.skyscanner_url or "").startswith("https://www.skyscanner.co.in/transport/flights/blr/dps"))
+        self.assertIsNotNone(f0.return_depart_time)
+        self.assertIsNotNone(f0.return_arrive_time)
+        self.assertIsNotNone(f0.return_duration)
+        self.assertIn("/261220/261225/", f0.skyscanner_url or "")
+        self.assertIn("adultsv2=2", f0.skyscanner_url or "")
+        self.assertIn("childrenv2=8%7C10", f0.skyscanner_url or "")
         self.assertGreaterEqual(len(f0.inclusions), 1)
-        # Ensure country-level "Indonesia" resolved to Bali (short airport transfer, not 5,800 km Borneo transfer!)
+        # International coverage must use Plum Guide, never India-only The Blue Kite
+        platforms = [pc.platform for pc in opt.platform_coverage]
+        self.assertIn("Plum Guide", platforms)
+        self.assertNotIn("The Blue Kite", platforms)
+        # Fly + Stay mode uses all-in transfer billing (0 liters of self-drive fuel)
+        self.assertEqual(top_bp.road.fuel_cost_inr, 0)
+        self.assertEqual(top_bp.road.estimated_fuel_liters, 0.0)
         self.assertLess(top_bp.road.total_distance_km, 450.0)
-        # Verify core_landed counts ONLY the active round-trip flight option, not the sum of all alternatives
         expected_core = (
             sum(s.best_landed_inr for s in top_bp.stays)
             + top_bp.road.total_road_cost_inr
             + f0.landed_family_total_inr
         )
         self.assertEqual(top_bp.total_core_landed_inr, expected_core)
+
+    async def test_impossible_overland_road_trip_auto_pivots_and_strict_math_invariants(self) -> None:
+        # Even if user leaves UI radio on 'road' for Bangalore -> Indonesia or Chennai -> Andaman,
+        # solver must auto-pivot to 'flight' instead of routing across open ocean!
+        ocean_spec = TripSpec(
+            origin="Bangalore",
+            destination="Indonesia",
+            start_date="2026-12-10",
+            end_date="2026-12-14",
+            transport_mode="road",
+            stay_strategy="hotels",
+            party=TravelParty(adults=2, children=1, child_ages=[9]),
+        )
+        opt = await solve_trip_pareto(ocean_spec, persist_snapshot=False)
+        self.assertEqual(opt.trip_spec.transport_mode, "flight")
+        bp0 = opt.blueprints[0]
+        self.assertGreaterEqual(len(bp0.flights), 3)
+        self.assertLess(bp0.road.total_distance_km, 450.0)
+        self.assertTrue(any("Auto-switched from Pure Road Trip to Fly + Stay" in c for c in bp0.arbitrage_callouts))
+        self.assertEqual(len(bp0.days), 5)
+
+        # Verify exact rupee accounting invariants across every stay offer and blueprint
+        for bp in opt.blueprints:
+            for st in bp.stays:
+                for off in st.offers:
+                    recomputed = (
+                        off.base_total_inr
+                        + off.extra_bed_or_addons_inr
+                        + off.platform_or_cleaning_fee_inr
+                        + off.taxes_gst_inr
+                        - off.promo_discount_inr
+                    )
+                    self.assertEqual(off.landed_total_inr, recomputed)
+                    self.assertTrue("2026-12-10" in off.booking_url or "google.com/travel/hotels" in off.booking_url)
+                self.assertEqual(st.best_landed_inr, min(o.landed_total_inr for o in st.offers))
+                self.assertEqual(st.worst_landed_inr, max(o.landed_total_inr for o in st.offers))
+                self.assertEqual(st.savings_inr, st.worst_landed_inr - st.best_landed_inr)
+
+            self.assertEqual(
+                bp.road.total_road_cost_inr,
+                bp.road.fuel_cost_inr + bp.road.fastag_and_forest_tolls_inr + bp.road.rental_car_cost_inr,
+            )
+
+    def test_natural_month_dates_duration_and_auto_flight_inference(self) -> None:
+        base_spec = TripSpec(
+            origin="Bengaluru",
+            destination="Coorg",
+            start_date="2026-11-30",
+            end_date="2026-12-04",
+            transport_mode="road",
+        )
+        # User doesn't write "fly", just "Plan a 5-night trip from Mumbai to Dubai"
+        s1, u1, q1 = _deterministic_nlp_extract(
+            ChatTurnRequest(
+                message="Plan a 5-night trip from Mumbai to Dubai",
+                current_spec=base_spec,
+            )
+        )
+        self.assertEqual(s1.origin, "Mumbai")
+        self.assertEqual(s1.destination, "Dubai")
+        self.assertEqual(s1.transport_mode, "flight")
+        self.assertEqual(s1.end_date, "2026-12-05")
+        self.assertTrue(any("Duration -> 5 Nights" in u for u in u1))
+        self.assertFalse(any("rolling out" in q for q in q1))
+
+        # Month-name dates: "from Dec 21 to Dec 26"
+        s2, _, _ = _deterministic_nlp_extract(
+            ChatTurnRequest(
+                message="Plan a trip from Bangalore to Andaman from Dec 21 to Dec 26",
+                current_spec=base_spec,
+            )
+        )
+        self.assertEqual(s2.destination, "Andaman")
+        self.assertEqual(s2.transport_mode, "flight")
+        self.assertEqual(s2.start_date, "2026-12-21")
+        self.assertEqual(s2.end_date, "2026-12-26")
 
 
 if __name__ == "__main__":

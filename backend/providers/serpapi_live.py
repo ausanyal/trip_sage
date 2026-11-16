@@ -399,6 +399,13 @@ async def search_serpapi_flights(
         ext_list = [str(x) for x in (first_leg.get("extensions") or [])[:2] if x]
         inclusions = ext_list or ["Live Round-Trip Quote", f"{pax} Travelers"]
 
+        try:
+            d1_sky = dt.date.fromisoformat(spec.start_date).strftime("%y%m%d")
+            d2_sky = dt.date.fromisoformat(spec.end_date).strftime("%y%m%d")
+            sky_dates = f"{d1_sky}/{d2_sky}/"
+        except Exception:
+            sky_dates = ""
+
         out_options.append(
             FlightOption(
                 id=f"live-flt-{o_hub.iata.lower()}-{hub_obj.iata.lower()}-{len(out_options) + 1}",
@@ -416,10 +423,11 @@ async def search_serpapi_flights(
                 booking_channel="Google Flights Live Carrier Direct",
                 booking_url=(
                     f"https://www.google.com/travel/flights?q=Flights+from+{o_hub.iata}+to+{hub_obj.iata}"
-                    f"+on+{spec.start_date}+return+{spec.end_date}+{quote_plus(airline)}+{quote_plus(dep_time)}"
+                    f"+on+{spec.start_date}+through+{spec.end_date}+{quote_plus(airline)}+{quote_plus(dep_time)}"
                 ),
                 skyscanner_url=(
-                    f"https://www.skyscanner.co.in/transport/flights/{o_hub.iata.lower()}/{hub_obj.iata.lower()}/"
+                    f"https://www.skyscanner.co.in/transport/flights/{o_hub.iata.lower()}/{hub_obj.iata.lower()}/{sky_dates}"
+                    f"?adultsv2={max(1, spec.party.adults)}&rtn=1"
                 ),
                 inclusions=inclusions,
                 origin_iata=o_hub.iata,

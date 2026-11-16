@@ -27,6 +27,7 @@ from providers.geo_routing import (
     GeoLocation,
     discover_pois,
     geocode_place,
+    is_overland_drivable,
     nearest_airports,
     parse_vehicle_profile,
     route_leg,
@@ -50,7 +51,9 @@ def _parse_trip_dates(start_str: str, end_str: str) -> Tuple[dt.date, dt.date, i
         d1 = dt.date.fromisoformat(end_str)
         if d1 <= d0:
             d1 = d0 + dt.timedelta(days=4)
-        return d0, d1, (d1 - d0).days
+        nights = min(14, max(1, (d1 - d0).days))
+        d1 = d0 + dt.timedelta(days=nights)
+        return d0, d1, nights
     except Exception:
         d0 = dt.date.today() + dt.timedelta(days=14)
         d1 = d0 + dt.timedelta(days=5)
@@ -544,19 +547,31 @@ async def _build_vrptw_itinerary_for_stay(
                 dist_matrix=dist_matrix,
                 used_restaurant_ids=used_rest_ids,
             )
-            loop_fuel = int(round((loop_km / max(1.0, km_per_l)) * fuel_price))
+            loop_fuel = (
+                0
+                if spec.transport_mode == "flight"
+                else int(round((loop_km / max(1.0, km_per_l)) * fuel_price))
+            )
             local_loop_segments.append(
                 RoadSegment(
                     id=f"seg-vrptw-day-{day_num}",
                     day_number=day_num,
                     from_name=dest_stay.name.split("—")[0].strip(),
                     to_name=f"{dest_geo.short_name} Day {day_num} VRPTW Loop",
-                    highway_label=f"2-Opt VRPTW Sector Tour ({len(vrp_stops)} Time-Windowed Stops)",
+                    highway_label=(
+                        f"2-Opt VRPTW Local Sightseeing Cab ({len(vrp_stops)} Stops)"
+                        if spec.transport_mode == "flight"
+                        else f"2-Opt VRPTW Sector Tour ({len(vrp_stops)} Time-Windowed Stops)"
+                    ),
                     distance_km=loop_km,
                     duration_mins=loop_mins,
                     fastag_toll_inr=0,
                     fuel_estimate_inr=loop_fuel,
-                    gate_alert=f"2-Opt VRPTW verified ({matrix_source}) · {clearance_mm}mm clearance ready.",
+                    gate_alert=(
+                        f"2-Opt VRPTW verified ({matrix_source}) · Chauffeured sightseeing cab included."
+                        if spec.transport_mode == "flight"
+                        else f"2-Opt VRPTW verified ({matrix_source}) · {clearance_mm}mm clearance ready."
+                    ),
                     coordinates=loop_coords,
                 )
             )
@@ -587,21 +602,25 @@ async def solve_trip_pareto(
 ) -> OptimizationResponse:
     """End-to-end Multi-Modal Arbitrage + N×N Matrix 2-Opt VRPTW + Strict 3D Pareto Frontier Solver."""
     t0 = time.perf_counter()
-    d_start, d_end, total_nights = _parse_trip_dates(spec.start_date, spec.end_date)
+    working_spec = spec.model_copy(deep=True)
+    d_start, d_end, total_nights = _parse_trip_dates(working_spec.start_date, working_spec.end_date)
+    working_spec.start_date = d_start.isoformat()
+    working_spec.end_date = d_end.isoformat()
+
     outbound_pins, dest_in, dest_out, return_pins = _partition_stay_windows(
-        d_start, d_end, spec.pinned_stays, spec.stay_strategy
+        d_start, d_end, working_spec.pinned_stays, working_spec.stay_strategy
     )
     active_pins = outbound_pins + return_pins
 
     if on_phase:
         await on_phase(
             "Phase 1 · Intent & Constraints",
-            f"Geocoding {spec.origin} -> {spec.destination} & hydrating {total_nights}N calendar constraints...",
+            f"Geocoding {working_spec.origin} -> {working_spec.destination} & hydrating {total_nights}N calendar constraints...",
         )
 
     # Phase 1A: Concurrent Geocoding + Live ECB FX Lookup
     unique_pin_cities = list(dict.fromkeys(p.city for p in active_pins))
-    geo_tasks = [geocode_place(spec.origin), geocode_place(spec.destination)] + [
+    geo_tasks = [geocode_place(working_spec.origin), geocode_place(working_spec.destination)] + [
         geocode_place(c) for c in unique_pin_cities
     ]
     fx_task = get_live_fx_rates()
@@ -614,21 +633,38 @@ async def solve_trip_pareto(
         city: geo_results[2 + i] for i, city in enumerate(unique_pin_cities)
     }
     active_currency = infer_currency_from_countries(
-        origin_geo.country_code, dest_geo.country_code, spec.currency
+        origin_geo.country_code, dest_geo.country_code, working_spec.currency
     )
     t_phase1_geo = int(round((time.perf_counter() - t0) * 1000))
+
+    # Overland Feasibility Guard: automatically pivot impossible ocean/cross-continental road trips to Fly + Stay
+    auto_mode_callout: Optional[str] = None
+    if working_spec.transport_mode == "road" and not is_overland_drivable(origin_geo, dest_geo):
+        working_spec.transport_mode = "flight"
+        working_spec.pinned_stays = []
+        outbound_pins, dest_in, dest_out, return_pins = [], d_start.isoformat(), d_end.isoformat(), []
+        active_pins = []
+        if "own car" in working_spec.vehicle_name.lower() or working_spec.vehicle_name in (
+            "Self-Drive SUV",
+            "Family SUV (Own Car)",
+        ):
+            working_spec.vehicle_name = "Airport Private Transfer SUV"
+        auto_mode_callout = (
+            f"Auto-switched from Pure Road Trip to Fly + Stay — {origin_geo.short_name} and "
+            f"{dest_geo.short_name} have no overland driving corridor across water/borders."
+        )
 
     # Phase 1B: Route Multi-Leg Highway Corridor + Gateway Flight Arbitrage
     if on_phase:
         await on_phase(
             "Phase 1 · Intent & Constraints",
-            f"Routing {spec.vehicle_name} highway geometry & scanning nearest gateway airports...",
+            f"Routing {working_spec.vehicle_name} corridor & scanning nearest gateway airports...",
         )
     t_route_start = time.perf_counter()
-    flights = await discover_gateway_flights(origin_geo, dest_geo, spec)
+    flights = await discover_gateway_flights(origin_geo, dest_geo, working_spec)
 
     leg_specs: List[Tuple[str, int, GeoLocation, GeoLocation]] = []
-    if spec.transport_mode in ("flight", "hybrid") and not active_pins:
+    if working_spec.transport_mode in ("flight", "hybrid") and not active_pins:
         dest_hubs = nearest_airports(dest_geo.lat, dest_geo.lng, max_km=380.0, limit=1)
         if not dest_hubs:
             dest_hubs = nearest_airports(dest_geo.lat, dest_geo.lng, max_km=2500.0, limit=1)
@@ -664,7 +700,10 @@ async def solve_trip_pareto(
             )
 
     routed_pairs = await asyncio.gather(
-        *[route_leg(sid, dnum, a, b, spec.vehicle_name) for sid, dnum, a, b in leg_specs]
+        *[
+            route_leg(sid, dnum, a, b, working_spec.vehicle_name, working_spec.transport_mode)
+            for sid, dnum, a, b in leg_specs
+        ]
     )
     highway_segments = [pair[0] for pair in routed_pairs]
     routing_sources = {pair[1] for pair in routed_pairs}
@@ -674,13 +713,13 @@ async def solve_trip_pareto(
     if on_phase:
         await on_phase(
             "Phase 2 · Multi-Channel Arbitrage",
-            f"Deduplicating cross-channel stays (SerpApi / Blue Kite / Airbnb / OTAs) & POIs in {dest_geo.short_name}...",
+            f"Deduplicating cross-channel stays & POIs in {dest_geo.short_name}...",
         )
     t_arb_start = time.perf_counter()
     pinned_resolved, (dest_candidates, coverage_notes), (pois, poi_source) = await asyncio.gather(
-        resolve_pinned_stays(active_pins, spec, pin_city_geos),
-        discover_destination_stays(dest_geo, spec, dest_in, dest_out),
-        discover_pois(dest_geo.lat, dest_geo.lng, dest_geo.short_name, spec.activities),
+        resolve_pinned_stays(active_pins, working_spec, pin_city_geos),
+        discover_destination_stays(dest_geo, working_spec, dest_in, dest_out),
+        discover_pois(dest_geo.lat, dest_geo.lng, dest_geo.short_name, working_spec.activities),
     )
     t_arb_ms = int(round((time.perf_counter() - t_arb_start) * 1000))
 
@@ -691,20 +730,20 @@ async def solve_trip_pareto(
     if on_phase:
         await on_phase(
             "Phase 3 · Spatio-Temporal Solver",
-            f"Solving N×N OSRM travel-time matrix, 2-Opt VRPTW schedule & strict 3D Pareto frontier...",
+            "Solving N×N OSRM travel-time matrix, 2-Opt VRPTW schedule & strict 3D Pareto frontier...",
         )
     t_dag_start = time.perf_counter()
-    clearance_mm, km_per_l, _ = parse_vehicle_profile(spec.vehicle_name)
+    clearance_mm, km_per_l, _ = parse_vehicle_profile(working_spec.vehicle_name)
     flight_landed = flights[0].landed_family_total_inr if flights else 0
     flight_unopt = flights[0].ota_unoptimized_inr if flights else 0
-    pax = max(1, spec.party.adults + spec.party.children)
+    pax = max(1, working_spec.party.adults + working_spec.party.children)
     est_dining_activities = int(round(pax * 820 * (total_nights + 1), -2))
 
     # Solve exact VRPTW schedule per candidate stay so micro-location detours genuinely impact road cost & fatigue!
     vrptw_results = await asyncio.gather(
         *[
             _build_vrptw_itinerary_for_stay(
-                spec=spec,
+                spec=working_spec,
                 d_start=d_start,
                 d_end=d_end,
                 origin_geo=origin_geo,
@@ -731,24 +770,49 @@ async def solve_trip_pareto(
         matrix_sources.add(mat_src)
         total_km = round(sum(s.distance_km for s in stay_segments), 1)
         total_mins = sum(s.duration_mins for s in stay_segments)
-        total_fuel_inr = sum(s.fuel_estimate_inr for s in stay_segments)
-        total_tolls_inr = sum(s.fastag_toll_inr for s in stay_segments)
-        rental_inr = (2900 * (total_nights + 1)) if spec.transport_mode == "hybrid" else 0
+
+        if working_spec.transport_mode == "flight":
+            est_liters = 0.0
+            total_fuel_inr = 0
+            total_tolls_inr = 0
+            transfer_rate_km = 32 if dest_geo.country_code == "in" else 58
+            min_transfer_floor = 2400 if dest_geo.country_code == "in" else 4200
+            rental_inr = max(min_transfer_floor, int(round(total_km * transfer_rate_km, -2)))
+            corridor_notes = [
+                f"Private airport pickup/drop & daily sightseeing transfers ({total_km} km across {len(stay_segments)} legs) priced all-in.",
+                f"Daily POI loops solved via K-Medoids + 2-Opt VRPTW over N×N matrix ({mat_src}, {poi_source}).",
+            ]
+        elif working_spec.transport_mode == "hybrid":
+            est_liters = round(total_km / max(1.0, km_per_l), 1)
+            total_fuel_inr = sum(s.fuel_estimate_inr for s in stay_segments)
+            total_tolls_inr = sum(s.fastag_toll_inr for s in stay_segments)
+            daily_rental = 2900 if dest_geo.country_code == "in" else 5200
+            rental_inr = daily_rental * (total_nights + 1)
+            corridor_notes = [
+                f"Self-drive rental ({working_spec.vehicle_name}) + local highway geometry: {total_km} km across {len(stay_segments)} legs.",
+                f"Daily POI loops solved via K-Medoids + 2-Opt VRPTW over N×N matrix ({mat_src}, {poi_source}).",
+            ]
+        else:
+            est_liters = round(total_km / max(1.0, km_per_l), 1)
+            total_fuel_inr = sum(s.fuel_estimate_inr for s in stay_segments)
+            total_tolls_inr = sum(s.fastag_toll_inr for s in stay_segments)
+            rental_inr = 0
+            corridor_notes = [
+                f"Highway geometry ({'Project OSRM Live/Cached' if any('osrm' in s for s in routing_sources) else 'Geodesic Corridor'}): {total_km} km across {len(stay_segments)} legs.",
+                f"Daily POI loops solved via K-Medoids + 2-Opt VRPTW over N×N matrix ({mat_src}, {poi_source}).",
+            ]
 
         road_summary = RoadSummary(
-            vehicle=spec.vehicle_name,
+            vehicle=working_spec.vehicle_name,
             ground_clearance_mm=clearance_mm,
             total_distance_km=total_km,
             total_drive_hours=round(total_mins / 60.0, 1),
-            estimated_fuel_liters=round(total_km / max(1.0, km_per_l), 1),
+            estimated_fuel_liters=est_liters,
             fuel_cost_inr=total_fuel_inr,
             fastag_and_forest_tolls_inr=total_tolls_inr,
             rental_car_cost_inr=rental_inr,
             total_road_cost_inr=total_fuel_inr + total_tolls_inr + rental_inr,
-            corridor_notes=[
-                f"Highway geometry ({'Project OSRM Live/Cached' if any('osrm' in s for s in routing_sources) else 'Geodesic Corridor'}): {total_km} km across {len(stay_segments)} legs.",
-                f"Daily POI loops solved via K-Medoids + 2-Opt VRPTW over N×N matrix ({mat_src}, {poi_source}).",
-            ],
+            corridor_notes=corridor_notes,
             segments=stay_segments,
         )
 
@@ -766,9 +830,12 @@ async def solve_trip_pareto(
         fatigue_score = min(78, max(14, int(round(avg_daily_mins * 0.19)) - comfort_credit))
         quality_score = min(99, int(round(chosen_stay.rating * 19.7)))
 
-        callouts = [
-            f"{chosen_stay.name}: ₹{chosen_stay.best_landed_inr // max(1, chosen_stay.nights):,}/night landed via {chosen_stay.best_channel} ({chosen_stay.provenance_label}).",
-        ]
+        callouts: List[str] = []
+        if auto_mode_callout:
+            callouts.append(auto_mode_callout)
+        callouts.append(
+            f"{chosen_stay.name}: ₹{chosen_stay.best_landed_inr // max(1, chosen_stay.nights):,}/night landed via {chosen_stay.best_channel} ({chosen_stay.provenance_label})."
+        )
         if chosen_stay.savings_inr > 0:
             callouts.append(
                 f"Same-Property Fee Arbitrage: {chosen_stay.best_channel} saves ₹{chosen_stay.savings_inr:,} vs. {chosen_stay.offers[-1].platform}."
@@ -811,7 +878,7 @@ async def solve_trip_pareto(
         )
 
     blueprints = strict_pareto_rank_and_filter(
-        raw_blueprints, max_results=max(3, min(8, spec.stay_options_limit))
+        raw_blueprints, max_results=max(3, min(8, working_spec.stay_options_limit))
     )
     front1_count = sum(1 for b in blueprints if b.pareto_front_rank == 1)
 
@@ -823,7 +890,7 @@ async def solve_trip_pareto(
             phase="Phase 1 · Intent & Constraints",
             tool_name="nominatim_geocoder_and_ecb_fx_hydrator",
             latency_ms=max(18, t_phase1_geo),
-            input_summary=f"{spec.origin} -> {spec.destination} ({spec.start_date}..{spec.end_date}) · {spec.party.adults}A+{spec.party.children}C",
+            input_summary=f"{working_spec.origin} -> {working_spec.destination} ({working_spec.start_date}..{working_spec.end_date}) · {working_spec.party.adults}A+{working_spec.party.children}C",
             finding_summary=(
                 f"Resolved {origin_geo.short_name} ({origin_geo.lat:.2f},{origin_geo.lng:.2f}) -> "
                 f"{dest_geo.short_name} ({dest_geo.lat:.2f},{dest_geo.lng:.2f}) [{origin_geo.source}] · Currency {active_currency} ({fx_source})."
@@ -832,11 +899,13 @@ async def solve_trip_pareto(
         ToolCallTrace(
             phase="Phase 1 · Intent & Constraints",
             tool_name="osrm_corridor_and_gateway_router",
+            status="pivoted" if auto_mode_callout else "completed",
             latency_ms=max(22, t_route_ms),
-            input_summary=f"{len(leg_specs)} highway legs · {spec.vehicle_name} ({spec.transport_mode} mode)",
+            input_summary=f"{len(leg_specs)} ground legs · {working_spec.vehicle_name} ({working_spec.transport_mode} mode)",
             finding_summary=(
                 f"Routed {blueprints[0].road.total_distance_km} km ({blueprints[0].road.total_drive_hours}h) · "
-                f"Fuel ₹{blueprints[0].road.fuel_cost_inr:,} · Tolls ₹{blueprints[0].road.fastag_and_forest_tolls_inr:,}."
+                f"Ground total ₹{blueprints[0].road.total_road_cost_inr:,}."
+                + (f" ({auto_mode_callout})" if auto_mode_callout else "")
             ),
         ),
         ToolCallTrace(
@@ -844,7 +913,7 @@ async def solve_trip_pareto(
             tool_name="serpapi_bluekite_ota_entity_deduplicator",
             status="pivoted" if (bk_cov and bk_cov.status == "zero_inventory_pivoted") else "completed",
             latency_ms=max(35, t_arb_ms),
-            input_summary=f"Cross-OTA & Direct Villa scan in {dest_geo.short_name} ({spec.stay_strategy})",
+            input_summary=f"Cross-OTA & Direct Villa scan in {dest_geo.short_name} ({working_spec.stay_strategy})",
             finding_summary=(
                 f"{bk_cov.note} Top savings: ₹{blueprints[0].total_arbitrage_savings_inr:,} ({blueprints[0].stays[0].price_provenance})."
                 if bk_cov
@@ -878,7 +947,7 @@ async def solve_trip_pareto(
             )
         ] + list(coverage_notes)
 
-    spec_out = spec.model_copy(deep=True)
+    spec_out = working_spec.model_copy(deep=True)
     if spec_out.currency is None:
         spec_out.currency = active_currency
 

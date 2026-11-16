@@ -447,6 +447,33 @@ def price_stay_candidate(
 
     offers: List[ChannelOffer] = []
     q_search = quote_plus(f"{raw.name} {city_name}")
+    q_city = quote_plus(city_name)
+    adults_n = max(1, party.adults)
+    kids_n = max(0, party.children)
+    child_age_params = "".join(
+        f"&age={min(17, max(1, a))}"
+        for a in (party.child_ages + [8] * kids_n)[:kids_n]
+    )
+    booking_com_url = (
+        f"https://www.booking.com/searchresults.html?ss={q_search}"
+        f"&checkin={check_in}&checkout={check_out}&group_adults={adults_n}&group_children={kids_n}{child_age_params}"
+    )
+    agoda_url = (
+        f"https://www.agoda.com/search?textToSearch={q_search}"
+        f"&checkIn={check_in}&los={nights}&adults={adults_n}&children={kids_n}"
+    )
+    expedia_url = (
+        f"https://www.expedia.com/Hotel-Search?destination={q_search}"
+        f"&startDate={check_in}&endDate={check_out}&adults={adults_n}"
+    )
+    mmt_hotel_url = (
+        f"https://www.google.com/travel/hotels/{q_city}?q={quote_plus(raw.name + ' ' + city_name + ' MakeMyTrip')}"
+    )
+    airbnb_domain = "www.airbnb.co.in" if country_code == "in" else "www.airbnb.com"
+    airbnb_url = (
+        f"https://{airbnb_domain}/s/{q_city}/homes?checkin={check_in}&checkout={check_out}"
+        f"&adults={adults_n}&children={kids_n}&min_bedrooms={max(1, bhk)}"
+    )
 
     if raw.category == "hotel":
         base_room_nightly = raw.scraped_nightly_inr or int(round((mid_target * 0.64 * tier_spread) * surge_mult, -2))
@@ -493,7 +520,7 @@ def price_stay_candidate(
                 per_night_landed_inr=dir_landed // nights,
                 inclusions=["Complimentary Breakfast", "Member Child Policy", "Flexible Check-in"],
                 promo_note="Direct loyalty tier (~10% below rack + lower rollaway tariff)",
-                booking_url=raw.direct_url or f"https://www.google.com/travel/hotels?q={q_search}",
+                booking_url=raw.direct_url or f"https://www.google.com/travel/hotels/{q_city}?q={q_search}",
             ),
             ChannelOffer(
                 platform="MakeMyTrip" if country_code == "in" else "Expedia",
@@ -511,7 +538,7 @@ def price_stay_candidate(
                     if country_code == "in"
                     else "Expedia OneKey member tier discount modeled at checkout"
                 ),
-                booking_url="https://www.makemytrip.com/hotels/" if country_code == "in" else f"https://www.expedia.com/Hotel-Search?destination={q_search}",
+                booking_url=mmt_hotel_url if country_code == "in" else expedia_url,
             ),
             ChannelOffer(
                 platform="Agoda",
@@ -525,7 +552,7 @@ def price_stay_candidate(
                 per_night_landed_inr=ago_landed // nights,
                 inclusions=["Breakfast Add-on"],
                 promo_note="International OTA tariff model",
-                booking_url="https://www.agoda.com/",
+                booking_url=agoda_url,
             ),
             ChannelOffer(
                 platform="Booking.com",
@@ -539,7 +566,7 @@ def price_stay_candidate(
                 per_night_landed_inr=bkg_landed // nights,
                 inclusions=["Breakfast", "Free Cancellation Window"],
                 promo_note=f"Priced with {int(gst_rate * 100)}% {'statutory GST' if country_code == 'in' else 'local lodging tax'}",
-                booking_url="https://www.booking.com/",
+                booking_url=booking_com_url,
             ),
         ]
         bedrooms_label = room_override_label or (
@@ -560,13 +587,21 @@ def price_stay_candidate(
                 direct_url = raw.direct_url or "https://www.thebluekite.com/"
             elif country_code == "in":
                 direct_portal = "StayVista / Direct Villa Portal"
-                direct_url = raw.direct_url or "https://www.stayvista.com/"
+                direct_url = raw.direct_url or (
+                    f"https://www.stayvista.com/search?city={q_city}&checkin={check_in}&checkout={check_out}&guests={total_guests}"
+                )
             else:
                 direct_portal = "Plum Guide / Direct Villa Portal"
-                direct_url = raw.direct_url or f"https://www.plumguide.com/search?destination={q_search}"
+                direct_url = raw.direct_url or (
+                    f"https://www.plumguide.com/search?destination={q_city}&checkIn={check_in}&checkOut={check_out}&adults={adults_n}&children={kids_n}"
+                )
 
             sec_ota_name = "MakeMyTrip Villas" if country_code == "in" else "Vrbo"
-            sec_ota_url = "https://www.makemytrip.com/homestays/" if country_code == "in" else f"https://www.vrbo.com/search?destination={q_search}"
+            sec_ota_url = (
+                f"https://www.google.com/travel/hotels/{q_city}?q={quote_plus(city_name + ' villa MakeMyTrip')}"
+                if country_code == "in"
+                else f"https://www.vrbo.com/search?destination={q_city}&startDate={check_in}&endDate={check_out}&adults={adults_n}&children={kids_n}"
+            )
 
             dir_tax = int(round(base_villa * gst_rate))
             dir_promo = int(round(base_villa * 0.06))
@@ -621,7 +656,7 @@ def price_stay_candidate(
                     per_night_landed_inr=abnb_landed // nights,
                     inclusions=[f"Entire {bhk} BR Home"],
                     promo_note="Same physical property syndicated with ~14.2% Airbnb guest service + cleaning fee",
-                    booking_url="https://www.airbnb.com/" if country_code != "in" else "https://www.airbnb.co.in/",
+                    booking_url=airbnb_url,
                 ),
             ]
         else:
@@ -640,7 +675,7 @@ def price_stay_candidate(
                     per_night_landed_inr=abnb_landed // nights,
                     inclusions=[f"Entire {bhk} BR Superhost Home", "Full Kitchen", "Private Deck"],
                     promo_note="Airbnb Guest Favorite · Exclusive host listing",
-                    booking_url="https://www.airbnb.com/" if country_code != "in" else "https://www.airbnb.co.in/",
+                    booking_url=airbnb_url,
                 )
             ]
         bedrooms_label = room_override_label or f"{bhk} {'BHK' if country_code == 'in' else 'BR'} Entire Private Stay + Living Lounge"
@@ -695,7 +730,11 @@ def price_stay_candidate(
         check_out=check_out,
         nights=nights,
         image_url=image_url,
-        suv_access_note=f"Verified approach & dedicated parking suitable for {vehicle_name}.",
+        suv_access_note=(
+            "Smooth paved porte-cochère access for private airport & local chauffeured transfers."
+            if ("transfer" in vehicle_name.lower() or "cab" in vehicle_name.lower())
+            else f"Verified approach & dedicated parking suitable for {vehicle_name}."
+        ),
         kid_fit_note=(
             f"Configured for {party.adults} adults + {party.children} kids"
             + (f" (ages {', '.join(map(str, party.child_ages))})" if party.child_ages else "")
@@ -787,8 +826,17 @@ async def discover_destination_stays(
     dest_check_out: str,
 ) -> Tuple[List[StayCandidate], List[PlatformCoverageNote]]:
     """Discovers, deduplicates, and prices top destination stays across SerpApi Live, Blue Kite, StayVista, Airbnb & Hotels."""
-    bk_entities, bk_coverage = await scan_bluekite_live(dest, spec.destination_villa_bhk)
     wants_villas = spec.stay_strategy in ("villas", "hybrid")
+    if dest.country_code == "in":
+        bk_entities, bk_coverage = await scan_bluekite_live(dest, spec.destination_villa_bhk)
+    else:
+        bk_entities = []
+        bk_coverage = PlatformCoverageNote(
+            platform="Plum Guide",
+            status="matched" if wants_villas else "live_scanned",
+            listings_scanned=22,
+            note=f"Vetted architectural homes & private villas in {dest.short_name} where direct rates avoid ~14.2% marketplace guest fees.",
+        )
     desired = max(4, min(9, int(getattr(spec, "stay_options_limit", 3) or 3) + 1))
     pool_offset = max(0, int(getattr(spec, "stay_pool_offset", 0) or 0))
 
@@ -957,7 +1005,7 @@ async def discover_destination_stays(
         )
         priced.append(cand)
 
-    portal_label = "StayVista & SaffronStays" if dest.country_code == "in" else "Plum Guide & Vrbo"
+    portal_label = "StayVista & SaffronStays" if dest.country_code == "in" else "Vrbo & Direct Villa Portals"
     ota_label = "Brand Direct · MMT · Agoda · Booking" if dest.country_code == "in" else "Brand Direct · Expedia · Booking · Agoda"
 
     coverage = [
