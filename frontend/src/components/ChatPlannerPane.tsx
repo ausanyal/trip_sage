@@ -2,6 +2,7 @@
 
 import React, { useEffect, useId, useRef, useState } from "react";
 import {
+  ArrowUpRight,
   Bot,
   CheckCircle2,
   Cpu,
@@ -11,36 +12,128 @@ import {
   Sparkles,
   User,
 } from "lucide-react";
-import type { ChatMessage, LivePhaseStatus } from "@/types/trip";
+import type { ChatMessage, LivePhaseStatus, PersonaMode } from "@/types/trip";
 
 interface ChatPlannerPaneProps {
   messages: ChatMessage[];
   isPlanning: boolean;
   livePhase?: LivePhaseStatus | null;
+  personaMode: PersonaMode;
+  onChangePersonaMode: (mode: PersonaMode) => void;
   onSendMessage: (message: string) => void;
 }
 
-const QUICK_PROMPTS = [
-  "Plan a road trip from Mumbai to Mahabaleshwar in a 3 BHK villa",
-  "Plan a hybrid fly + drive trip from Bengaluru to Rishikesh",
-  "Switch villa to 3 BHK within 20-28k",
-  "Switch dietary to pure veg",
+const PERSONA_OPTIONS: Array<{ id: PersonaMode; label: string; title: string }> = [
+  { id: "advisor", label: "Advisor", title: "Luxury & Quant Travel Strategist" },
+  { id: "eli5", label: "ELI5", title: "Plain-English Family Analogy Mode" },
+  { id: "debate", label: "Debate", title: "Pareto Knee vs. Runner-Up Committee Debate" },
+  { id: "devil", label: "Risk Audit", title: "Pre-Mortem Risk, Checkpost & Fatigue Auditor" },
 ];
 
-function renderFormattedText(raw: string): React.ReactNode {
-  const parts = raw.split(/(\*\*[^*]+\*\*)/g);
+const QUICK_PROMPTS = [
+  "Why does #1 win on landed fee math?",
+  "Compare top 2 options in Debate mode",
+  "Audit hidden risks & fatigue",
+  "Search more similar places to stay",
+];
+
+function renderInlineTokens(raw: string): React.ReactNode {
+  const parts = raw.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
   return parts.map((part, i) => {
     if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
       return <strong key={i}>{part.slice(2, -2)}</strong>;
     }
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+      return (
+        <code
+          key={i}
+          style={{
+            padding: "0.08rem 0.34rem",
+            borderRadius: "0.32rem",
+            background: "var(--bg-subtle)",
+            fontSize: "0.79rem",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
     return <React.Fragment key={i}>{part}</React.Fragment>;
   });
+}
+
+function renderRichMarkdown(raw: string): React.ReactNode {
+  const lines = raw.split("\n");
+  const blocks: React.ReactNode[] = [];
+  let listItems: string[] = [];
+
+  const flushList = (keyPrefix: string) => {
+    if (listItems.length === 0) return;
+    const copy = listItems;
+    listItems = [];
+    blocks.push(
+      <ul
+        key={keyPrefix}
+        style={{
+          margin: "0.2rem 0",
+          paddingInlineStart: "1.1rem",
+          display: "flex",
+          flexDirection: "column",
+          gap: "0.22rem",
+        }}
+      >
+        {copy.map((li, idx) => (
+          <li key={idx}>{renderInlineTokens(li)}</li>
+        ))}
+      </ul>
+    );
+  };
+
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushList(`list-${idx}`);
+      return;
+    }
+    if (trimmed.startsWith("### ")) {
+      flushList(`list-${idx}`);
+      blocks.push(
+        <div
+          key={`h3-${idx}`}
+          style={{
+            fontWeight: 800,
+            fontSize: "0.84rem",
+            marginBlockStart: blocks.length > 0 ? "0.35rem" : 0,
+            color: "var(--accent-primary)",
+          }}
+        >
+          {renderInlineTokens(trimmed.slice(4))}
+        </div>
+      );
+      return;
+    }
+    if (trimmed.startsWith("- ") || trimmed.startsWith("• ")) {
+      listItems.push(trimmed.slice(2));
+      return;
+    }
+    flushList(`list-${idx}`);
+    blocks.push(
+      <p key={`p-${idx}`} style={{ margin: 0, lineHeight: 1.48 }}>
+        {renderInlineTokens(trimmed)}
+      </p>
+    );
+  });
+  flushList("list-final");
+  return <div style={{ display: "flex", flexDirection: "column", gap: "0.38rem" }}>{blocks}</div>;
 }
 
 export function ChatPlannerPane({
   messages,
   isPlanning,
   livePhase,
+  personaMode,
+  onChangePersonaMode,
   onSendMessage,
 }: ChatPlannerPaneProps) {
   const [draft, setDraft] = useState("");
@@ -85,7 +178,7 @@ export function ChatPlannerPane({
       {/* Agent Header */}
       <div
         style={{
-          padding: "0.85rem 1rem",
+          padding: "0.8rem 1rem",
           borderBlockEnd: "1px solid var(--border-subtle)",
           background: "var(--bg-elevated)",
           display: "flex",
@@ -98,16 +191,32 @@ export function ChatPlannerPane({
           <Cpu size={18} aria-hidden="true" color="var(--accent-primary)" />
           <div>
             <div style={{ fontWeight: 800, fontSize: "0.88rem" }}>
-              TripSage Planner Agent
+              TripSage Reasoning Copilot
             </div>
-            <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
-              SSE 3-Phase Streaming · VRPTW + Pareto
+            <div style={{ fontSize: "0.71rem", color: "var(--text-muted)" }}>
+              3-Stage Gemini + Vertex AI · Pareto + VRPTW
             </div>
           </div>
         </div>
         <span className="badge badge-emerald">
-          <Sparkles size={11} aria-hidden="true" /> v3.0 Live
+          <Sparkles size={11} aria-hidden="true" /> v3.2 AI
         </span>
+      </div>
+
+      {/* Material 3 Persona Reasoning Lens Bar */}
+      <div className="m3-persona-bar" role="group" aria-label="Reasoning persona mode">
+        {PERSONA_OPTIONS.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            className="m3-persona-pill"
+            aria-pressed={personaMode === p.id}
+            title={p.title}
+            onClick={() => onChangePersonaMode(p.id)}
+          >
+            {p.label}
+          </button>
+        ))}
       </div>
 
       {/* Conversation Feed */}
@@ -115,10 +224,10 @@ export function ChatPlannerPane({
         className="pane-scroll"
         style={{
           flex: 1,
-          padding: "0.95rem",
+          padding: "0.9rem",
           display: "flex",
           flexDirection: "column",
-          gap: "0.9rem",
+          gap: "0.85rem",
         }}
       >
         <ul
@@ -129,7 +238,7 @@ export function ChatPlannerPane({
             padding: 0,
             display: "flex",
             flexDirection: "column",
-            gap: "0.9rem",
+            gap: "0.85rem",
           }}
         >
           {messages.map((m) => {
@@ -142,7 +251,7 @@ export function ChatPlannerPane({
                   flexDirection: "column",
                   gap: "0.45rem",
                   padding: "0.8rem 0.9rem",
-                  borderRadius: "0.85rem",
+                  borderRadius: "0.95rem",
                   background: isUser ? "var(--bg-subtle)" : "var(--bg-elevated)",
                   border: `1px solid ${
                     isUser ? "var(--border-subtle)" : "var(--border-strong)"
@@ -152,9 +261,11 @@ export function ChatPlannerPane({
                 <div
                   style={{
                     display: "flex",
+                    flexWrap: "wrap",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    fontSize: "0.73rem",
+                    gap: "0.35rem",
+                    fontSize: "0.72rem",
                     color: "var(--text-muted)",
                     fontWeight: 700,
                   }}
@@ -165,16 +276,16 @@ export function ChatPlannerPane({
                     ) : (
                       <Bot size={14} aria-hidden="true" color="var(--accent-primary)" />
                     )}
-                    {isUser ? "You" : "TripSage Multi-Phase Agent"}
+                    {isUser ? "You" : m.engine_label || "TripSage Reasoning Agent"}
                   </span>
                   <span>{m.timestamp}</span>
                 </div>
 
                 {/* Extracted Parameter Sync Chips */}
                 {m.extracted_updates && m.extracted_updates.length > 0 && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.32rem" }}>
                     {m.extracted_updates.map((upd) => (
-                      <span key={upd} className="badge badge-route" style={{ fontSize: "0.69rem" }}>
+                      <span key={upd} className="badge badge-route" style={{ fontSize: "0.68rem" }}>
                         <CheckCircle2 size={11} aria-hidden="true" /> {upd}
                       </span>
                     ))}
@@ -184,13 +295,12 @@ export function ChatPlannerPane({
                 {/* Multi-Phase Planner Tool Execution Trace */}
                 {m.tool_trace && m.tool_trace.length > 0 && (
                   <details
-                    open={m.id === "turn-4"}
                     style={{
                       borderRadius: "0.65rem",
                       border: "1px solid var(--border-subtle)",
                       background: "var(--bg-surface)",
-                      padding: "0.5rem 0.65rem",
-                      fontSize: "0.75rem",
+                      padding: "0.48rem 0.65rem",
+                      fontSize: "0.74rem",
                     }}
                   >
                     <summary
@@ -200,24 +310,24 @@ export function ChatPlannerPane({
                         color: "var(--accent-primary)",
                       }}
                     >
-                      Executed {m.tool_trace.length} Planner Tools (3 Phases)
+                      Executed {m.tool_trace.length} Planner &amp; Reasoning Steps
                     </summary>
                     <ol
                       role="list"
                       style={{
                         listStyle: "none",
-                        margin: "0.55rem 0 0",
+                        margin: "0.5rem 0 0",
                         padding: 0,
                         display: "flex",
                         flexDirection: "column",
-                        gap: "0.45rem",
+                        gap: "0.4rem",
                       }}
                     >
                       {m.tool_trace.map((t, idx) => (
                         <li
                           key={`${t.tool_name}-${idx}`}
                           style={{
-                            padding: "0.45rem 0.55rem",
+                            padding: "0.42rem 0.52rem",
                             borderRadius: "0.5rem",
                             background: "var(--bg-elevated)",
                             borderInlineStart: `3px solid ${
@@ -232,16 +342,16 @@ export function ChatPlannerPane({
                               display: "flex",
                               justifyContent: "space-between",
                               fontWeight: 700,
-                              fontSize: "0.72rem",
+                              fontSize: "0.71rem",
                             }}
                           >
-                            <code>{t.tool_name}()</code>
+                            <code>{t.tool_name}</code>
                             <span style={{ color: "var(--text-muted)" }}>{t.latency_ms}ms</span>
                           </div>
-                          <div style={{ color: "var(--text-muted)", fontSize: "0.69rem" }}>
+                          <div style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>
                             {t.phase}
                           </div>
-                          <div style={{ marginBlockStart: "0.18rem", color: "var(--text-secondary)" }}>
+                          <div style={{ marginBlockStart: "0.15rem", color: "var(--text-secondary)" }}>
                             {t.finding_summary}
                           </div>
                         </li>
@@ -250,32 +360,53 @@ export function ChatPlannerPane({
                   </details>
                 )}
 
-                <div
-                  style={{
-                    fontSize: "0.84rem",
-                    whiteSpace: "pre-line",
-                    color: "var(--text-primary)",
-                  }}
-                >
-                  {renderFormattedText(m.content)}
+                <div style={{ fontSize: "0.83rem", color: "var(--text-primary)" }}>
+                  {renderRichMarkdown(m.content)}
                 </div>
 
                 {m.follow_up_questions && m.follow_up_questions.length > 0 && (
                   <ol
                     style={{
-                      margin: "0.25rem 0 0",
+                      margin: "0.2rem 0 0",
                       paddingInlineStart: "1.15rem",
-                      fontSize: "0.8rem",
+                      fontSize: "0.79rem",
                       color: "var(--text-secondary)",
                       display: "flex",
                       flexDirection: "column",
-                      gap: "0.25rem",
+                      gap: "0.22rem",
                     }}
                   >
                     {m.follow_up_questions.map((q, idx) => (
-                      <li key={idx}>{renderFormattedText(q)}</li>
+                      <li key={idx}>{renderInlineTokens(q)}</li>
                     ))}
                   </ol>
+                )}
+
+                {/* 1-Click Follow-Up Reasoning Chips */}
+                {!isUser && m.suggested_prompts && m.suggested_prompts.length > 0 && (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "0.3rem",
+                      marginBlockStart: "0.25rem",
+                    }}
+                  >
+                    {m.suggested_prompts.slice(0, 3).map((sp) => (
+                      <button
+                        key={sp}
+                        type="button"
+                        disabled={isPlanning}
+                        className="m3-followup-chip"
+                        onClick={() => onSendMessage(sp)}
+                      >
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+                          <ArrowUpRight size={12} aria-hidden="true" color="var(--accent-primary)" />
+                          <span>{sp}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                 )}
               </li>
             );
@@ -286,7 +417,7 @@ export function ChatPlannerPane({
               aria-live="polite"
               style={{
                 padding: "0.8rem 0.95rem",
-                borderRadius: "0.8rem",
+                borderRadius: "0.85rem",
                 background: "var(--bg-elevated)",
                 border: "1px solid var(--accent-primary)",
                 fontSize: "0.8rem",
@@ -309,7 +440,7 @@ export function ChatPlannerPane({
               </div>
               <div style={{ color: "var(--text-secondary)", fontSize: "0.75rem" }}>
                 {livePhase?.detail ??
-                  "Streaming live OSRM routing, cross-OTA rate deduplication & 2-Opt VRPTW solver..."}
+                  "Streaming OSRM routing, cross-OTA rate deduplication & Gemini reasoning..."}
               </div>
             </li>
           )}
@@ -320,12 +451,12 @@ export function ChatPlannerPane({
       {/* Quick Prompts + IME-Safe Chat Form */}
       <div
         style={{
-          padding: "0.75rem 0.9rem",
+          padding: "0.7rem 0.9rem",
           borderBlockStart: "1px solid var(--border-subtle)",
           background: "var(--bg-elevated)",
           display: "flex",
           flexDirection: "column",
-          gap: "0.55rem",
+          gap: "0.5rem",
         }}
       >
         <div
@@ -344,9 +475,9 @@ export function ChatPlannerPane({
               disabled={isPlanning}
               onClick={() => onSendMessage(qp)}
               style={{
-                minBlockSize: "1.85rem",
-                padding: "0.2rem 0.55rem",
-                fontSize: "0.71rem",
+                minBlockSize: "1.8rem",
+                padding: "0.18rem 0.55rem",
+                fontSize: "0.7rem",
                 whiteSpace: "nowrap",
               }}
             >
@@ -363,7 +494,7 @@ export function ChatPlannerPane({
           style={{ display: "flex", gap: "0.45rem", alignItems: "flex-end" }}
         >
           <label htmlFor={chatInputId} className="visually-hidden">
-            Describe trip updates, stay preferences, or itinerary changes
+            Ask a travel question, compare blueprints, or update your itinerary
           </label>
           <textarea
             id={chatInputId}
@@ -375,19 +506,19 @@ export function ChatPlannerPane({
               lastCompositionEndRef.current = e.nativeEvent.timeStamp;
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Chat any city worldwide, budget, currency, or stay strategy..."
+            placeholder="Ask why an option wins, audit risks, or update any city/stay/budget..."
             className="chat-textarea"
-            style={{ flex: 1, resize: "vertical", minBlockSize: "3rem" }}
+            style={{ flex: 1, resize: "vertical", minBlockSize: "2.9rem" }}
           />
           <button
             type="submit"
             disabled={isPlanning}
             className="btn btn-primary"
-            style={{ minBlockSize: "3rem", paddingInline: "0.9rem" }}
+            style={{ minBlockSize: "2.9rem", paddingInline: "0.85rem", borderRadius: "999px" }}
             aria-label="Send message to planner"
           >
-            <Send size={16} aria-hidden="true" />
-            <CornerDownLeft size={13} aria-hidden="true" />
+            <Send size={15} aria-hidden="true" />
+            <CornerDownLeft size={12} aria-hidden="true" />
           </button>
         </form>
       </div>

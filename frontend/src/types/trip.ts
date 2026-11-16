@@ -3,6 +3,17 @@ export type StayStrategy = "hotels" | "villas" | "hybrid";
 export type DietaryPreference = "veg" | "non_veg" | "both";
 export type CurrencyCode = "INR" | "USD" | "EUR" | "GBP";
 export type PriceProvenance = "live_verified" | "live_scraped" | "estimated_benchmark";
+export type PersonaMode = "advisor" | "eli5" | "debate" | "devil";
+export type M3SeedId = "emerald" | "amber" | "sapphire" | "violet";
+
+export interface UICommand {
+  cmd: "SET_TAB" | "SELECT_DAY" | "SET_CURRENCY" | "OPEN_PARAMS" | "SELECT_BLUEPRINT";
+  tab?: "itinerary" | "arbitrage" | "telemetry" | null;
+  day?: number | null;
+  currency?: CurrencyCode | null;
+  blueprint_idx?: number | null;
+  reason?: string | null;
+}
 
 export const DEFAULT_FX_RATES: Record<CurrencyCode, number> = {
   INR: 1.0,
@@ -253,7 +264,8 @@ export interface ToolCallTrace {
   phase:
     | "Phase 1 · Intent & Constraints"
     | "Phase 2 · Multi-Channel Arbitrage"
-    | "Phase 3 · Spatio-Temporal Solver";
+    | "Phase 3 · Spatio-Temporal Solver"
+    | "Phase 4 · Grounded Advisory Reasoning";
   tool_name: string;
   status: "completed" | "pivoted";
   latency_ms: number;
@@ -277,7 +289,9 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: string;
+  engine_label?: string;
   extracted_updates?: string[];
   tool_trace?: ToolCallTrace[];
   follow_up_questions?: string[];
+  suggested_prompts?: string[];
 }

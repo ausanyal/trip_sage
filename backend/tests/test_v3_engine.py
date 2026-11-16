@@ -12,7 +12,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from agent import _deterministic_nlp_extract
+from agent import _deterministic_nlp_extract, _extract_non_thought_text, _extract_ui_commands, process_chat_turn
 from currency import format_amount_from_inr, infer_currency_from_countries
 from db import cache_get_json, cache_set_json, load_trip_snapshot, save_trip_snapshot
 from main import chat_turn_stream, get_persisted_trip, health_check, persist_trip, run_optimizer_stream
@@ -568,6 +568,47 @@ class TestTripSageV3Engine(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(s2.transport_mode, "flight")
         self.assertEqual(s2.start_date, "2026-12-21")
         self.assertEqual(s2.end_date, "2026-12-26")
+
+    async def test_stage3_persona_reasoning_ui_commands_and_thought_filter(self) -> None:
+        # 1. Verify Gemini 2.5 thinking-part filter keeps only visible response text
+        sample_gemini_resp = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"thought": True, "text": "Internal reasoning chain..."},
+                            {"text": "Grounded travel synthesis."},
+                        ]
+                    }
+                }
+            ]
+        }
+        self.assertEqual(_extract_non_thought_text(sample_gemini_resp), "Grounded travel synthesis.")
+
+        # 2. Verify bi-directional UI page-driver command extraction
+        cmds = _extract_ui_commands("Open channel arbitrage and focus Day 2 on the map", max_days=5)
+        cmd_names = [c.cmd for c in cmds]
+        self.assertIn("SET_TAB", cmd_names)
+        self.assertIn("SELECT_DAY", cmd_names)
+
+        # 3. Verify 3-stage offline debate & risk-audit persona synthesis
+        base_spec = TripSpec(
+            origin="Bengaluru",
+            destination="Coorg",
+            start_date="2026-12-10",
+            end_date="2026-12-13",
+            transport_mode="road",
+        )
+        turn = await process_chat_turn(
+            ChatTurnRequest(
+                message="Compare our top options and open stay arbitrage",
+                current_spec=base_spec,
+                mode="debate",
+            )
+        )
+        self.assertIn("Case for Pareto Knee", turn.assistant_reply)
+        self.assertTrue(len(turn.suggested_prompts) >= 2)
+        self.assertTrue(any(c.cmd == "SET_TAB" and c.tab == "arbitrage" for c in turn.ui_commands))
 
 
 if __name__ == "__main__":

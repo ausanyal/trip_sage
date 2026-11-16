@@ -9,6 +9,7 @@ StayStrategy = Literal["hotels", "villas", "hybrid"]
 DietaryPreference = Literal["veg", "non_veg", "both"]
 CurrencyCode = Literal["INR", "USD", "EUR", "GBP"]
 PriceProvenance = Literal["live_verified", "live_scraped", "estimated_benchmark"]
+PersonaMode = Literal["advisor", "eli5", "debate", "devil"]
 
 
 class TravelParty(BaseModel):
@@ -225,6 +226,7 @@ class ToolCallTrace(BaseModel):
         "Phase 1 · Intent & Constraints",
         "Phase 2 · Multi-Channel Arbitrage",
         "Phase 3 · Spatio-Temporal Solver",
+        "Phase 4 · Grounded Advisory Reasoning",
     ]
     tool_name: str
     status: Literal["completed", "pivoted"] = "completed"
@@ -256,10 +258,21 @@ class ChatMessage(BaseModel):
     tool_trace: List[ToolCallTrace] = Field(default_factory=list)
 
 
+class UICommand(BaseModel):
+    cmd: Literal["SET_TAB", "SELECT_DAY", "SET_CURRENCY", "OPEN_PARAMS", "SELECT_BLUEPRINT"]
+    tab: Optional[Literal["itinerary", "arbitrage", "telemetry"]] = None
+    day: Optional[int] = None
+    currency: Optional[CurrencyCode] = None
+    blueprint_idx: Optional[int] = None
+    reason: Optional[str] = None
+
+
 class ChatTurnRequest(BaseModel):
     message: str
     current_spec: TripSpec
     history: List[ChatMessage] = Field(default_factory=list)
+    mode: PersonaMode = "advisor"
+    api_key: Optional[str] = None
 
 
 class ChatTurnResponse(BaseModel):
@@ -268,6 +281,10 @@ class ChatTurnResponse(BaseModel):
     extracted_updates: List[str]
     needs_clarification: bool = False
     follow_up_questions: List[str] = Field(default_factory=list)
+    suggested_prompts: List[str] = Field(default_factory=list)
+    ui_commands: List[UICommand] = Field(default_factory=list)
+    engine_label: str = "TripSage 3-Phase Engine"
+    used_llm: bool = False
     optimization: Optional[OptimizationResponse] = None
 
 

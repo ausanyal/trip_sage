@@ -43,11 +43,21 @@ import {
   type ChatMessage,
   type CurrencyCode,
   type LivePhaseStatus,
+  type M3SeedId,
   type OptimizationResponse,
+  type PersonaMode,
   type StayCandidate,
   type TimelineStop,
   type TripSpec,
+  type UICommand,
 } from "@/types/trip";
+
+const M3_SEEDS: Array<{ id: M3SeedId; label: string; color: string }> = [
+  { id: "emerald", label: "Emerald Forest", color: "#10b981" },
+  { id: "amber", label: "Flame Amber", color: "#f59e0b" },
+  { id: "sapphire", label: "Ocean Sapphire", color: "#0ea5e9" },
+  { id: "violet", label: "Royal Violet", color: "#a855f7" },
+];
 
 const INITIAL_PRESETS = presetsRaw as unknown as {
   wayanad: OptimizationResponse;
@@ -252,6 +262,8 @@ export default function TripSageWorkspacePage() {
   const [inspectedStay, setInspectedStay] = useState<StayCandidate | null>(null);
   const [isPlanning, setIsPlanning] = useState<boolean>(false);
   const [livePhase, setLivePhase] = useState<LivePhaseStatus | null>(null);
+  const [personaMode, setPersonaMode] = useState<PersonaMode>("advisor");
+  const [m3Seed, setM3Seed] = useState<M3SeedId>("emerald");
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     buildWelcomeConversation()
   );
@@ -334,6 +346,17 @@ export default function TripSageWorkspacePage() {
     const saved = localStorage.getItem("color-scheme");
     if (saved === "light" || saved === "dark") {
       setPinnedScheme(saved);
+    }
+
+    const savedSeed = localStorage.getItem("m3-seed") as M3SeedId | null;
+    if (
+      savedSeed === "emerald" ||
+      savedSeed === "amber" ||
+      savedSeed === "sapphire" ||
+      savedSeed === "violet"
+    ) {
+      setM3Seed(savedSeed);
+      document.documentElement.dataset.m3Seed = savedSeed;
     }
 
     const onChange = (ev: MediaQueryListEvent) => {
@@ -738,11 +761,26 @@ export default function TripSageWorkspacePage() {
         : buildCleanBlankSpec();
 
       try {
+        const autoMode: PersonaMode =
+          /\b(debate|bull\s+vs|compare\s+top)\b/i.test(userText)
+            ? "debate"
+            : /\b(risk\s+audit|hidden\s+risks|pre-mortem|devil)\b/i.test(userText)
+            ? "devil"
+            : /\b(eli5|like\s+i'm\s+5)\b/i.test(userText)
+            ? "eli5"
+            : personaMode;
+        if (autoMode !== personaMode) {
+          setPersonaMode(autoMode);
+        }
+
         const payload = await consumeSsePost<{
           updated_spec: TripSpec;
           assistant_reply: string;
           extracted_updates: string[];
           follow_up_questions?: string[];
+          suggested_prompts?: string[];
+          ui_commands?: UICommand[];
+          engine_label?: string;
           optimization?: OptimizationResponse;
         }>(
           "/api/chat/stream",
@@ -750,6 +788,7 @@ export default function TripSageWorkspacePage() {
           {
             message: userText,
             current_spec: baseSpec,
+            mode: autoMode,
             history: baseHistory.map((m) => ({
               role: m.role,
               content: m.content,
@@ -762,9 +801,11 @@ export default function TripSageWorkspacePage() {
           id: `a-${Date.now()}`,
           role: "assistant",
           timestamp: "Just now",
+          engine_label: payload.engine_label,
           extracted_updates: payload.extracted_updates,
           tool_trace: payload.optimization?.tool_trace,
           follow_up_questions: payload.follow_up_questions,
+          suggested_prompts: payload.suggested_prompts,
           content: payload.assistant_reply,
         };
 
@@ -792,6 +833,25 @@ export default function TripSageWorkspacePage() {
           setHasActiveTrip(true);
           saveRecentTripToBrowser(payload.optimization, nextMsgs);
         }
+
+        if (Array.isArray(payload.ui_commands)) {
+          for (const cmd of payload.ui_commands) {
+            if (cmd.cmd === "SET_TAB" && cmd.tab) {
+              setActiveTab(cmd.tab);
+            } else if (cmd.cmd === "SELECT_DAY" && typeof cmd.day === "number") {
+              setActiveDay(cmd.day);
+            } else if (cmd.cmd === "SET_CURRENCY" && cmd.currency) {
+              setCurrency(cmd.currency);
+            } else if (cmd.cmd === "OPEN_PARAMS") {
+              setShowParamsDrawer(true);
+            } else if (
+              cmd.cmd === "SELECT_BLUEPRINT" &&
+              typeof cmd.blueprint_idx === "number"
+            ) {
+              setSelectedBlueprintIdx(cmd.blueprint_idx);
+            }
+          }
+        }
       } catch {
         setMessages((prev) => [
           ...prev,
@@ -808,7 +868,7 @@ export default function TripSageWorkspacePage() {
         setLivePhase(null);
       }
     },
-    [currency, hasActiveTrip, messages, optimization.trip_spec, saveRecentTripToBrowser]
+    [currency, hasActiveTrip, messages, optimization.trip_spec, personaMode, saveRecentTripToBrowser]
   );
 
   const handleTryExample = useCallback(
@@ -1219,6 +1279,36 @@ export default function TripSageWorkspacePage() {
             </>
           )}
 
+          {/* Android Material You Dynamic Tonal Seed Picker */}
+          <div
+            className="m3-seed-group"
+            role="group"
+            aria-label="Material You dynamic accent color"
+          >
+            {M3_SEEDS.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className="m3-seed-swatch"
+                aria-pressed={m3Seed === s.id}
+                aria-label={`Accent theme: ${s.label}`}
+                title={`Material You seed: ${s.label}`}
+                onClick={() => {
+                  setM3Seed(s.id);
+                  if (s.id === "emerald") {
+                    localStorage.removeItem("m3-seed");
+                    delete document.documentElement.dataset.m3Seed;
+                  } else {
+                    localStorage.setItem("m3-seed", s.id);
+                    document.documentElement.dataset.m3Seed = s.id;
+                  }
+                }}
+              >
+                <span className="m3-seed-dot" style={{ backgroundColor: s.color }} />
+              </button>
+            ))}
+          </div>
+
           <button
             type="button"
             className="btn"
@@ -1245,6 +1335,8 @@ export default function TripSageWorkspacePage() {
           messages={messages}
           isPlanning={isPlanning}
           livePhase={livePhase}
+          personaMode={personaMode}
+          onChangePersonaMode={setPersonaMode}
           onSendMessage={handleSendMessage}
         />
 

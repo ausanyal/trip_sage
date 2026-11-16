@@ -20,6 +20,10 @@ const themeInitScript = `{
       if (meta) meta.setAttribute("content", saved);
       document.documentElement.dataset.theme = saved;
     }
+    const seed = localStorage.getItem("m3-seed");
+    if (seed === "amber" || seed === "sapphire" || seed === "violet") {
+      document.documentElement.dataset.m3Seed = seed;
+    }
   } catch (_) {}
 }`;
 

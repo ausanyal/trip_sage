@@ -1550,5 +1550,163 @@ dialog.arbitrage-dialog[open]::backdrop {
   }
 }
 
+/* ==========================================================================
+   Android Material You (Material 3 HCT) Dynamic Tonal Seeds & State Layers
+   ========================================================================== */
+
+:root {
+  --m3-ease-spatial: cubic-bezier(0.2, 0, 0, 1);
+  --m3-surface-container-lowest: var(--bg-surface);
+  --m3-surface-container-low: var(--bg-elevated);
+  --m3-surface-container: color-mix(in oklab, var(--bg-elevated) 78%, var(--accent-soft));
+  --m3-surface-container-high: var(--bg-subtle);
+  --m3-state-hover: color-mix(in oklab, var(--accent-primary) 9%, var(--bg-elevated));
+  --m3-state-pressed: color-mix(in oklab, var(--accent-primary) 15%, var(--bg-elevated));
+}
+
+/* Seed 2: Flame Amber (HCT Hue ~55°) */
+html[data-m3-seed="amber"] {
+  --accent-primary-light: #b45309;
+  --accent-primary-fg-light: #ffffff;
+  --accent-soft-light: #fef3c7;
+  --accent-primary-dark: #fbbf24;
+  --accent-primary-fg-dark: #271500;
+  --accent-soft-dark: #3f2806;
+}
+
+/* Seed 3: Ocean Sapphire (HCT Hue ~235°) */
+html[data-m3-seed="sapphire"] {
+  --accent-primary-light: #0369a1;
+  --accent-primary-fg-light: #ffffff;
+  --accent-soft-light: #e0f2fe;
+  --accent-primary-dark: #38bdf8;
+  --accent-primary-fg-dark: #041f30;
+  --accent-soft-dark: #092c46;
+}
+
+/* Seed 4: Royal Violet (HCT Hue ~285°) */
+html[data-m3-seed="violet"] {
+  --accent-primary-light: #6d28d9;
+  --accent-primary-fg-light: #ffffff;
+  --accent-soft-light: #ede9fe;
+  --accent-primary-dark: #c084fc;
+  --accent-primary-fg-dark: #22063e;
+  --accent-soft-dark: #2b124c;
+}
+
+html[data-m3-seed][data-theme="dark"] {
+  --accent-primary: var(--accent-primary-dark);
+  --accent-primary-fg: var(--accent-primary-fg-dark);
+  --accent-soft: var(--accent-soft-dark);
+}
+
+html[data-m3-seed][data-theme="light"] {
+  --accent-primary: var(--accent-primary-light);
+  --accent-primary-fg: var(--accent-primary-fg-light);
+  --accent-soft: var(--accent-soft-light);
+}
+
+.btn:hover:not(:disabled):not(.btn-primary) {
+  background: var(--m3-state-hover);
+  border-color: color-mix(in oklab, var(--accent-primary) 38%, var(--border-subtle));
+}
+
+.btn:active:not(:disabled):not(.btn-primary) {
+  background: var(--m3-state-pressed);
+}
+
+.m3-seed-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.42rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+.m3-seed-swatch {
+  inline-size: 1.35rem;
+  block-size: 1.35rem;
+  min-inline-size: 1.5rem;
+  min-block-size: 1.5rem;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  transition: transform 0.18s var(--m3-ease-spatial), border-color 0.18s ease;
+}
+
+.m3-seed-swatch:hover {
+  transform: scale(1.12);
+}
+
+.m3-seed-swatch[aria-pressed="true"] {
+  border-color: var(--text-primary);
+}
+
+.m3-seed-dot {
+  inline-size: 0.85rem;
+  block-size: 0.85rem;
+  border-radius: 999px;
+}
+
+.m3-persona-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.5rem 0.9rem;
+  border-block-end: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+
+.m3-persona-pill {
+  flex: 1 1 auto;
+  min-block-size: 1.85rem;
+  padding: 0.2rem 0.52rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 0.71rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.m3-persona-pill:hover {
+  background: var(--m3-state-hover);
+  color: var(--text-primary);
+}
+
+.m3-persona-pill[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.m3-followup-chip {
+  text-align: start;
+  padding: 0.34rem 0.65rem;
+  min-block-size: 1.9rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--accent-primary) 35%, var(--border-subtle));
+  background: var(--m3-surface-container);
+  color: var(--text-primary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.18s ease, transform 0.18s var(--m3-ease-spatial);
+}
+
+.m3-followup-chip:hover:not(:disabled) {
+  background: var(--m3-state-hover);
+  transform: translateY(-1px);
+}
+
+
 
 

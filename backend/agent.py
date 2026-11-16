@@ -16,9 +16,12 @@ from db import save_trip_snapshot
 from models import (
     ChatTurnRequest,
     ChatTurnResponse,
+    OptimizationResponse,
+    PersonaMode,
     PinnedStaySpec,
     ToolCallTrace,
     TripSpec,
+    UICommand,
 )
 from providers.geo_routing import COUNTRY_VISITOR_GATEWAYS, OFFLINE_GAZETTEER, haversine_km
 from solver.pareto_dag import PhaseEmitter, solve_trip_pareto
@@ -54,57 +57,207 @@ Rules:
 """
 
 
+_GCP_VERTEX_CACHE: Dict[str, Any] = {
+    "project": "",
+    "token": "",
+    "exp": 0.0,
+    "cooldown_until": 0.0,
+}
+
+
+async def _get_gcp_vertex_auth() -> Tuple[str, str]:
+    """Fetches project_id and OAuth2 access_token from Google Cloud Run metadata server when available."""
+    now = time.time()
+    if now < float(_GCP_VERTEX_CACHE.get("cooldown_until", 0.0)):
+        return "", ""
+    if (
+        _GCP_VERTEX_CACHE.get("token")
+        and _GCP_VERTEX_CACHE.get("project")
+        and now < float(_GCP_VERTEX_CACHE.get("exp", 0.0))
+    ):
+        return str(_GCP_VERTEX_CACHE["project"]), str(_GCP_VERTEX_CACHE["token"])
+
+    proj = (
+        os.getenv("GOOGLE_CLOUD_PROJECT")
+        or os.getenv("GCLOUD_PROJECT")
+        or os.getenv("GCP_PROJECT")
+        or ""
+    ).strip()
+    is_cloud_run = bool(os.getenv("K_SERVICE") or proj)
+    timeout_s = 1.6 if is_cloud_run else 0.35
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            if not proj:
+                r_proj = await client.get(
+                    "http://metadata.google.internal/computeMetadata/v1/project/project-id",
+                    headers={"Metadata-Flavor": "Google"},
+                )
+                if r_proj.status_code != 200:
+                    if not is_cloud_run:
+                        _GCP_VERTEX_CACHE["cooldown_until"] = now + 90.0
+                    return "", ""
+                proj = r_proj.text.strip()
+
+            r_tok = await client.get(
+                "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+                headers={"Metadata-Flavor": "Google"},
+            )
+            if r_tok.status_code != 200:
+                if not is_cloud_run:
+                    _GCP_VERTEX_CACHE["cooldown_until"] = now + 90.0
+                return "", ""
+            tok_data = r_tok.json()
+            access_token = str(tok_data.get("access_token") or "").strip()
+            expires_in = int(tok_data.get("expires_in") or 600)
+            if not proj or not access_token:
+                return "", ""
+            _GCP_VERTEX_CACHE["project"] = proj
+            _GCP_VERTEX_CACHE["token"] = access_token
+            _GCP_VERTEX_CACHE["exp"] = now + max(60, expires_in - 60)
+            return proj, access_token
+    except Exception:
+        if not is_cloud_run:
+            _GCP_VERTEX_CACHE["cooldown_until"] = now + 90.0
+        return "", ""
+
+
+def _extract_non_thought_text(data: Dict[str, Any]) -> str:
+    candidates = data.get("candidates") or []
+    if not candidates:
+        return ""
+    parts = (candidates[0].get("content") or {}).get("parts") or []
+    visible = [str(p.get("text") or "") for p in parts if not p.get("thought") and p.get("text")]
+    if visible:
+        return "".join(visible).strip()
+    fallback = [str(p.get("text") or "") for p in parts if p.get("text")]
+    return "".join(fallback).strip()
+
+
+async def _invoke_gemini_or_vertex(
+    prompt_text: str,
+    *,
+    api_key: str = "",
+    preferred_model: str = "gemini-2.5-flash",
+    json_mode: bool = False,
+    temperature: float = 0.2,
+    max_tokens: int = 1600,
+    thinking_budget: int = 0,
+    timeout_s: float = 15.0,
+) -> Optional[Tuple[str, str, str]]:
+    """Calls Gemini Developer API (if key set) or Cloud Run Vertex AI via service-account metadata."""
+    models = [preferred_model]
+    for fb in ("gemini-2.5-flash", "gemini-2.0-flash-001", "gemini-2.0-flash"):
+        if fb not in models:
+            models.append(fb)
+
+    def _build_body(model_id: str) -> Dict[str, Any]:
+        gen_cfg: Dict[str, Any] = {
+            "temperature": temperature,
+            "maxOutputTokens": max_tokens,
+        }
+        if json_mode:
+            gen_cfg["responseMimeType"] = "application/json"
+        if thinking_budget > 0 and model_id.startswith("gemini-2.5"):
+            gen_cfg["thinkingConfig"] = {"thinkingBudget": thinking_budget}
+        return {
+            "contents": [{"role": "user", "parts": [{"text": prompt_text}]}],
+            "generationConfig": gen_cfg,
+        }
+
+    # Route A: Explicit or Server-Env Gemini API Key
+    clean_key = api_key.strip()
+    if clean_key:
+        try:
+            async with httpx.AsyncClient(timeout=timeout_s) as client:
+                for m in models:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+                    resp = await client.post(
+                        url,
+                        headers={"Content-Type": "application/json", "x-goog-api-key": clean_key},
+                        json=_build_body(m),
+                    )
+                    if resp.status_code == 200:
+                        txt = _extract_non_thought_text(resp.json())
+                        if txt:
+                            return txt, m, "Gemini API"
+                    elif resp.status_code in (400, 401, 403) and "API_KEY_INVALID" in resp.text:
+                        break
+        except Exception:
+            pass
+
+    # Route B: Zero-Key Google Cloud Run Vertex AI Metadata Auth
+    proj_id, bearer = await _get_gcp_vertex_auth()
+    if proj_id and bearer:
+        try:
+            async with httpx.AsyncClient(timeout=timeout_s) as client:
+                for loc in ("global", "us-central1", "asia-south1"):
+                    host = "aiplatform.googleapis.com" if loc == "global" else f"{loc}-aiplatform.googleapis.com"
+                    abort_vertex = False
+                    for m in models:
+                        url = f"https://{host}/v1/projects/{proj_id}/locations/{loc}/publishers/google/models/{m}:generateContent"
+                        resp = await client.post(
+                            url,
+                            headers={
+                                "Content-Type": "application/json",
+                                "Authorization": f"Bearer {bearer}",
+                            },
+                            json=_build_body(m),
+                        )
+                        if resp.status_code == 200:
+                            txt = _extract_non_thought_text(resp.json())
+                            if txt:
+                                return txt, m, f"Vertex AI · {loc}"
+                        elif "SERVICE_DISABLED" in resp.text or (
+                            resp.status_code == 403 and "PERMISSION_DENIED" in resp.text
+                        ):
+                            _GCP_VERTEX_CACHE["cooldown_until"] = time.time() + 300.0
+                            abort_vertex = True
+                            break
+                    if abort_vertex:
+                        break
+        except Exception:
+            pass
+
+    return None
+
+
 async def _call_gemini_spec_extractor(
     req: ChatTurnRequest, api_key: str, model_name: str
-) -> Optional[Tuple[TripSpec, List[str], bool, List[str], str, int]]:
+) -> Optional[Tuple[TripSpec, List[str], bool, List[str], str, int, str, str]]:
     t0 = time.perf_counter()
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
-
     history_lines = [f"{m.role.upper()}: {m.content}" for m in req.history[-6:]]
-    user_payload = (
+    combined_prompt = (
+        f"{GEMINI_SYSTEM_PROMPT}\n\n"
         f"CURRENT_TRIP_SPEC_JSON:\n{req.current_spec.model_dump_json(indent=2)}\n\n"
         f"RECENT_CONVERSATION:\n" + ("\n".join(history_lines) if history_lines else "(start)") + "\n\n"
         f"LATEST_USER_MESSAGE:\n{req.message}"
     )
 
-    body: Dict[str, Any] = {
-        "systemInstruction": {"parts": [{"text": GEMINI_SYSTEM_PROMPT}]},
-        "contents": [{"role": "user", "parts": [{"text": user_payload}]}],
-        "generationConfig": {
-            "temperature": 0.15,
-            "responseMimeType": "application/json",
-        },
-    }
+    llm_out = await _invoke_gemini_or_vertex(
+        combined_prompt,
+        api_key=api_key,
+        preferred_model=model_name,
+        json_mode=True,
+        temperature=0.15,
+        max_tokens=1800,
+        thinking_budget=256,
+        timeout_s=14.0,
+    )
+    if not llm_out:
+        return None
 
+    text, used_model, provider = llm_out
     try:
-        async with httpx.AsyncClient(timeout=12.0) as client:
-            resp = await client.post(
-                url,
-                headers={
-                    "Content-Type": "application/json",
-                    "x-goog-api-key": api_key,
-                },
-                json=body,
-            )
-            if resp.status_code != 200:
-                return None
-            data = resp.json()
-            text = (
-                data.get("candidates", [{}])[0]
-                .get("content", {})
-                .get("parts", [{}])[0]
-                .get("text", "")
-            )
-            if not text:
-                return None
-            parsed = json.loads(text)
-            updated_spec = TripSpec.model_validate(parsed["updated_spec"])
-            updates = [str(x) for x in (parsed.get("extracted_updates") or [])]
-            needs_clar = bool(parsed.get("needs_clarification", False))
-            questions = [str(q) for q in (parsed.get("follow_up_questions") or [])]
-            preface = str(parsed.get("assistant_preface") or "").strip()
-            elapsed_ms = max(40, int(round((time.perf_counter() - t0) * 1000)))
-            return updated_spec, updates, needs_clar, questions, preface, elapsed_ms
+        cleaned_json = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.I)
+        parsed = json.loads(cleaned_json)
+        updated_spec = TripSpec.model_validate(parsed["updated_spec"])
+        updates = [str(x) for x in (parsed.get("extracted_updates") or [])]
+        needs_clar = bool(parsed.get("needs_clarification", False))
+        questions = [str(q) for q in (parsed.get("follow_up_questions") or [])]
+        preface = str(parsed.get("assistant_preface") or "").strip()
+        elapsed_ms = max(40, int(round((time.perf_counter() - t0) * 1000)))
+        return updated_spec, updates, needs_clar, questions, preface, elapsed_ms, used_model, provider
     except Exception:
         return None
 
@@ -827,101 +980,289 @@ def _format_stay_comparison_shortlist(opt: Any) -> str:
     return "\n".join(lines)
 
 
-async def process_chat_turn(
+_RE_FOLLOW_UPS = re.compile(r"(?im)^FOLLOW_UPS:\s*(.+)$")
+_RE_UI_CMDS = re.compile(r"(?im)^UI_COMMANDS_JSON:\s*(\[.*\])\s*$")
+
+
+def _extract_ui_commands(message: str, max_days: int) -> List[UICommand]:
+    cmds: List[UICommand] = []
+    low = message.lower()
+
+    m_day = re.search(r"\b(?:focus|zoom|show|open|inspect|jump\s+to)\s+day\s*(\d{1,2})\b", low)
+    if m_day:
+        d_num = int(m_day.group(1))
+        if 1 <= d_num <= max(1, max_days):
+            cmds.append(
+                UICommand(
+                    cmd="SELECT_DAY",
+                    day=d_num,
+                    reason=f"Focused map & companion snapshot on Day {d_num}",
+                )
+            )
+
+    if re.search(r"\b(?:open|show|switch\s+to|inspect)\s+(?:channel|stay|fee|ota)?\s*arbitrage\b", low):
+        cmds.append(
+            UICommand(
+                cmd="SET_TAB",
+                tab="arbitrage",
+                reason="Switched workspace tab to Cross-Channel Arbitrage",
+            )
+        )
+    elif re.search(r"\b(?:open|show|switch\s+to|inspect)\s+(?:road|toll|fastag|fuel|transfer|telemetry)\b", low):
+        cmds.append(
+            UICommand(
+                cmd="SET_TAB",
+                tab="telemetry",
+                reason="Switched workspace tab to Road, Tolls & Logistics",
+            )
+        )
+    elif re.search(r"\b(?:open|show|switch\s+to)\s+(?:daily\s+)?itinerary\b", low):
+        cmds.append(
+            UICommand(
+                cmd="SET_TAB",
+                tab="itinerary",
+                reason="Switched workspace tab to VRPTW Itinerary",
+            )
+        )
+
+    m_bp = re.search(r"\b(?:select|switch\s+to|choose|activate)\s+(?:blueprint|option|runner[- ]up)\s*#?(\d)\b", low)
+    if m_bp:
+        bp_idx = max(0, int(m_bp.group(1)) - 1)
+        cmds.append(
+            UICommand(
+                cmd="SELECT_BLUEPRINT",
+                blueprint_idx=bp_idx,
+                reason=f"Selected Pareto Blueprint #{bp_idx + 1}",
+            )
+        )
+
+    if re.search(r"\b(?:open|edit|tune|show)\s+(?:trip\s+)?(?:inputs|parameters|spec\s+drawer)\b", low):
+        cmds.append(UICommand(cmd="OPEN_PARAMS", reason="Opened Bi-Directional Trip Spec Drawer"))
+
+    return cmds
+
+
+def _build_evidence_snapshot(opt: OptimizationResponse) -> str:
+    ccy = opt.active_currency
+    fx = opt.fx_rates
+    spec = opt.trip_spec
+    lines = [
+        f"Route: {spec.origin} -> {spec.destination} ({spec.start_date} to {spec.end_date})",
+        f"Mode: {spec.transport_mode} | Stay Strategy: {spec.stay_strategy} | Vehicle: {spec.vehicle_name}",
+        f"Party: {spec.party.adults} Adults + {spec.party.children} Kids (Ages: {spec.party.child_ages}) | Dietary: {spec.activities.dietary}",
+        f"Active Currency: {ccy}",
+        "",
+        "=== PARETO FRONTIER BLUEPRINTS ===",
+    ]
+    for idx, bp in enumerate(opt.blueprints[:5], start=1):
+        tot = format_amount_from_inr(bp.total_core_landed_inr, ccy, fx)
+        unopt = format_amount_from_inr(bp.unoptimized_baseline_inr, ccy, fx)
+        sav = format_amount_from_inr(bp.total_arbitrage_savings_inr, ccy, fx)
+        stay_desc = "; ".join(
+            f"{s.name} ({s.nights}N via {s.best_channel}: {format_amount_from_inr(s.best_landed_inr, ccy, fx)} vs worst {format_amount_from_inr(s.worst_landed_inr, ccy, fx)}, rating {s.rating})"
+            for s in bp.stays
+        )
+        lines.append(
+            f"#{idx} [{bp.rank_badge}] {bp.name}: Core All-In={tot} (Unoptimized={unopt}, Saves={sav}) | "
+            f"Fatigue={bp.fatigue_score}/100 | Utility={bp.quality_score}/100 | Stays: {stay_desc}"
+        )
+
+    top = opt.blueprints[0]
+    if top.flights:
+        lines.append("\n=== GATEWAY FLIGHT OPTIONS ===")
+        for f in top.flights[:4]:
+            f_tot = format_amount_from_inr(f.landed_family_total_inr, ccy, fx)
+            f_sav = format_amount_from_inr(f.savings_inr, ccy, fx)
+            lines.append(
+                f"- {f.carrier} ({f.route_label}): Out {f.depart_time}-{f.arrive_time} ({f.duration}), "
+                f"Ret {f.return_depart_time or 'N/A'}-{f.return_arrive_time or 'N/A'} | Party Total={f_tot} (Saves {f_sav})"
+            )
+
+    lines.append(
+        f"\n=== ROAD / GROUND LOGISTICS ===\n"
+        f"Distance={top.road.total_distance_km} km | Drive Hours={top.road.total_drive_hours}h | "
+        f"Ground Total={format_amount_from_inr(top.road.total_road_cost_inr, ccy, fx)} "
+        f"(Fuel={format_amount_from_inr(top.road.fuel_cost_inr, ccy, fx)}, Tolls={format_amount_from_inr(top.road.fastag_and_forest_tolls_inr, ccy, fx)})"
+    )
+    if top.arbitrage_callouts:
+        lines.append("Callouts: " + " | ".join(top.arbitrage_callouts[:4]))
+
+    lines.append("\n=== DAILY VRPTW SCHEDULE HIGHLIGHTS ===")
+    for d in top.days[:6]:
+        stop_titles = ", ".join(f"{s.time_window} {s.title}" for s in d.stops[:4])
+        lines.append(
+            f"Day {d.day_number} ({d.date_label}): {d.headline} [{d.drive_km} km, {d.drive_time_label}, Stay: {d.overnight_label}] -> {stop_titles}"
+        )
+    return "\n".join(lines)
+
+
+def _stage3_system_prompt(mode: PersonaMode, had_updates: bool) -> str:
+    persona_map: Dict[str, str] = {
+        "advisor": (
+            "PERSONA: Articulate, executive Luxury & Quantitative Travel Strategist. "
+            "Speak warmly in first person, explaining trade-offs across landed channel fees, driving fatigue, checkpost windows, and kid-friendly pacing."
+        ),
+        "eli5": (
+            "PERSONA: Friendly Plain-English Family Travel Coach (ELI5). "
+            "Use vivid everyday analogies (like comparing hidden OTA cleaning fees to airport baggage surcharges, and VRPTW routing to beating school-run traffic) while keeping every rupee/dollar figure exact."
+        ),
+        "debate": (
+            "PERSONA: Travel Investment Committee Debate. "
+            "Structure your reasoning into '### 🟢 Case for the Pareto Knee (#1)', '### 🔵 Case for the Runner-Up Alternative', and '### ⚖️ Final Verdict' using exact figures."
+        ),
+        "devil": (
+            "PERSONA: Candid Chief Risk Officer & Pre-Mortem Travel Auditor. "
+            "Stress-test this itinerary for hidden traps: checkpost/curfew cutoffs, kid car-sickness/ghat fatigue, non-refundable villa policies, weather/peak-season bottlenecks, and concrete mitigations."
+        ),
+    }
+    persona = persona_map.get(mode, persona_map["advisor"])
+    update_rule = (
+        "Open by briefly confirming the route/spec updates you just locked in, then reason over the solved Pareto blueprints and answer the user's intent."
+        if had_updates
+        else "Directly answer the user's question or reasoning request using the exact numbers in [SOLVED PARETO & ARBITRAGE EVIDENCE]."
+    )
+    return (
+        "You are TripSage Copilot — a 3-stage multi-modal travel arbitrage, Pareto, and VRPTW reasoning agent.\n"
+        f"{persona}\n"
+        "RULES:\n"
+        f"1. {update_rule}\n"
+        "2. Ground every price, hotel/villa name, flight carrier, distance, and savings number STRICTLY in [SOLVED PARETO & ARBITRAGE EVIDENCE]. Never invent properties or numbers.\n"
+        "3. Keep your response crisp, high-signal, and well-structured (110–250 words).\n"
+        "4. On the very final line, append `FOLLOW_UPS: Question 1? | Question 2? | Question 3?` with 3 smart, clickable follow-up prompts tailored to this trip."
+    )
+
+
+async def _run_stage3_reasoning(
     req: ChatTurnRequest,
-    on_phase: Optional[PhaseEmitter] = None,
-) -> ChatTurnResponse:
-    """Multi-Phase Conversational Planner: Gemini API primary + deterministic NLP fallback + SSE hooks."""
-    api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
-    model_name = (os.getenv("GEMINI_MODEL") or "gemini-2.5-flash").strip()
+    opt: OptimizationResponse,
+    updates: List[str],
+    api_key: str,
+    model_name: str,
+) -> Optional[Tuple[str, List[str], str, str, int]]:
+    t0 = time.perf_counter()
+    evidence = _build_evidence_snapshot(opt)
+    hist_lines = [f"{m.role.upper()}: {m.content[:360]}" for m in req.history[-5:]]
+    prompt = (
+        f"{_stage3_system_prompt(req.mode, bool(updates))}\n\n"
+        f"=== RECENT CONVERSATION ===\n" + ("\n".join(hist_lines) if hist_lines else "(Start)") + "\n\n"
+        f"=== EXTRACTED SPEC UPDATES THIS TURN ===\n{', '.join(updates) if updates else 'None (Analytical / Advisory Turn)'}\n\n"
+        f"=== [SOLVED PARETO & ARBITRAGE EVIDENCE] ===\n{evidence}\n\n"
+        f"=== USER MESSAGE ===\n{req.message}"
+    )
+    llm_res = await _invoke_gemini_or_vertex(
+        prompt,
+        api_key=api_key,
+        preferred_model=model_name,
+        json_mode=False,
+        temperature=0.3,
+        max_tokens=1400,
+        thinking_budget=512,
+        timeout_s=16.0,
+    )
+    if not llm_res:
+        return None
+    raw_text, used_model, provider = llm_res
+    follow_ups: List[str] = []
+    clean_lines: List[str] = []
+    for line in raw_text.splitlines():
+        m_fu = _RE_FOLLOW_UPS.match(line.strip())
+        if m_fu:
+            follow_ups = [
+                p.strip(" `\"'*-•")
+                for p in m_fu.group(1).split("|")
+                if p.strip(" `\"'*-•")
+            ][:3]
+        elif not _RE_UI_CMDS.match(line.strip()):
+            clean_lines.append(line)
+    elapsed_ms = max(45, int(round((time.perf_counter() - t0) * 1000)))
+    clean_md = "\n".join(clean_lines).strip()
+    if not clean_md:
+        return None
+    return clean_md, follow_ups, used_model, provider, elapsed_ms
 
-    if on_phase:
-        await on_phase(
-            "Phase 1 · Intent & Constraints",
-            "Extracting structured trip intent, transit anchors, party constraints & currency...",
-        )
 
-    gemini_result = None
-    if api_key:
-        gemini_result = await _call_gemini_spec_extractor(req, api_key, model_name)
+def _default_follow_up_prompts(opt: OptimizationResponse) -> List[str]:
+    dest = opt.trip_spec.destination.split(",")[0].strip()
+    prompts = [
+        f"Why does {opt.blueprints[0].name} win on landed fee math?",
+        f"Stress-test this {dest} itinerary for hidden risks & fatigue",
+        f"Search more similar places to stay in {dest}",
+    ]
+    return prompts[:3]
 
-    if gemini_result is not None:
-        updated_spec, updates, needs_clar, questions, preface, llm_ms = gemini_result
-        if updated_spec.destination.strip().lower() != req.current_spec.destination.strip().lower():
-            if not re.search(r"\b(inr|usd|eur|gbp|rupees?|dollars?|euros?|pounds?)\b|[₹$€£]", req.message, re.I):
-                updated_spec.currency = None
-        if updated_spec.pinned_stays and updated_spec.stay_strategy == "villas":
-            updated_spec.stay_strategy = "hybrid"
-        opt = await solve_trip_pareto(updated_spec, on_phase=on_phase, persist_snapshot=False)
-        opt.tool_trace.insert(
-            0,
-            ToolCallTrace(
-                phase="Phase 1 · Intent & Constraints",
-                tool_name=f"gemini_planner_extract ({model_name})",
-                latency_ms=llm_ms,
-                input_summary=req.message[:90],
-                finding_summary=", ".join(updates) if updates else "Confirmed conversational intent & constraints.",
-            ),
-        )
-        top_bp = opt.blueprints[0]
-        fmt_core = format_amount_from_inr(top_bp.total_core_landed_inr, opt.active_currency, opt.fx_rates)
-        fmt_save = format_amount_from_inr(top_bp.total_arbitrage_savings_inr, opt.active_currency, opt.fx_rates)
-        flt_note = ""
-        if top_bp.flights:
-            f0 = top_bp.flights[0]
-            fmt_flt = format_amount_from_inr(f0.landed_family_total_inr, opt.active_currency, opt.fx_rates)
-            flt_note = (
-                f" Includes **{len(top_bp.flights)} round-trip flight options** led by **{f0.carrier}** "
-                f"({f0.origin_iata or opt.trip_spec.origin} -> {f0.dest_iata or opt.trip_spec.destination}, **{fmt_flt}** for your party)."
-            )
-        expanded_pool = (
-            updated_spec.stay_options_limit > req.current_spec.stay_options_limit
-            or updated_spec.stay_pool_offset != req.current_spec.stay_pool_offset
-        )
-        if expanded_pool:
-            shortlist = _format_stay_comparison_shortlist(opt)
-            dest_short = opt.trip_spec.destination.split(",")[0].strip()
-            reply = (
-                f"{preface + ' ' if preface else ''}"
-                f"Expanded your **{dest_short}** stay search to **{len(opt.blueprints)} comparable options** "
-                f"(all priced all-in and solved with your route):\n\n{shortlist}\n\n"
-                f"All **{len(opt.blueprints)} Pareto cards** are now live on the right — click any card to switch your itinerary & map, "
-                f"or ask *\"show another batch of stays\"* to scan deeper!"
-            )
-        else:
-            reply = (
-                f"{preface + ' ' if preface else ''}"
-                f"Solved **{len(opt.blueprints)} non-dominated Pareto blueprints** for **{opt.trip_spec.origin} -> {opt.trip_spec.destination}** — "
-                f"Pareto Knee **{top_bp.name}** lands at **{fmt_core}** core all-in "
-                f"(saving **{fmt_save}** via cross-channel arbitrage).{flt_note}"
-            )
-        if questions:
-            reply += "\n\nTo fine-tune this draft itinerary, let me know your preferences on:"
-        transcript = [m.model_dump() for m in req.history] + [
-            {"role": "user", "content": req.message},
-            {
-                "role": "assistant",
-                "content": reply,
-                "extracted_updates": updates,
-                "follow_up_questions": questions,
-            },
-        ]
-        opt.trip_id = save_trip_snapshot(opt.trip_spec.model_dump(), opt.model_dump(), transcript)
-        return ChatTurnResponse(
-            updated_spec=opt.trip_spec,
-            assistant_reply=reply,
-            extracted_updates=updates or ["Gemini Spec Synced"],
-            needs_clarification=needs_clar or bool(questions),
-            follow_up_questions=questions,
-            optimization=opt,
-        )
 
-    # Zero-key fallback: deterministic multi-clause NLP + live OSRM/OSM/BlueKite/VRPTW Pareto solver
-    updated_spec, updates, questions = _deterministic_nlp_extract(req)
-    opt = await solve_trip_pareto(updated_spec, on_phase=on_phase, persist_snapshot=False)
+def _synthesize_builtin_reasoning_reply(
+    req: ChatTurnRequest,
+    opt: OptimizationResponse,
+    updates: List[str],
+    questions: List[str],
+    expanded_pool: bool,
+) -> str:
+    """Deterministic multi-mode reasoning synthesizer when neither Gemini API key nor Cloud Run Vertex AI is reachable."""
+    ccy = opt.active_currency
+    fx = opt.fx_rates
     top_bp = opt.blueprints[0]
-    fmt_core = format_amount_from_inr(top_bp.total_core_landed_inr, opt.active_currency, opt.fx_rates)
-    fmt_save = format_amount_from_inr(top_bp.total_arbitrage_savings_inr, opt.active_currency, opt.fx_rates)
+    alt_bp = opt.blueprints[1] if len(opt.blueprints) > 1 else None
+    fmt_core = format_amount_from_inr(top_bp.total_core_landed_inr, ccy, fx)
+    fmt_save = format_amount_from_inr(top_bp.total_arbitrage_savings_inr, ccy, fx)
+    low_msg = req.message.lower()
+
+    if expanded_pool:
+        dest_short = opt.trip_spec.destination.split(",")[0].strip()
+        shortlist = _format_stay_comparison_shortlist(opt)
+        return (
+            f"Expanded your **{dest_short}** stay search to **{len(opt.blueprints)} non-dominated options** "
+            f"(each solved end-to-end with your route & party):\n\n"
+            f"{shortlist}\n\n"
+            f"Click any Pareto card on the right (or open **Cross-Channel Stay Arbitrage**) to switch your itinerary & map!"
+        )
+
+    if req.mode == "eli5" or "like i'm 5" in low_msg or "eli5" in low_msg:
+        primary_stay = top_bp.stays[-1] if top_bp.stays else None
+        stay_analogy = (
+            f"For **{primary_stay.name}**, booking via **{primary_stay.best_channel}** is like buying concert tickets at the box office instead of paying markup + service fees—saving **{format_amount_from_inr(primary_stay.savings_inr, ccy, fx)}** on the exact same bedrooms."
+            if primary_stay
+            else ""
+        )
+        return (
+            f"Here is the plain-English picture for **{opt.trip_spec.origin} -> {opt.trip_spec.destination}**:\n\n"
+            f"- **Think of our Pareto solver like picking the sweet-spot family car:** **{top_bp.name}** lands at **{fmt_core}** all-in (saving **{fmt_save}**) without exhausting everyone on the road (`Fatigue {top_bp.fatigue_score}/100`).\n"
+            f"- **Zero Backtracking Schedule:** We grouped stops by neighborhood and morning/lunch clocks across **{len(top_bp.days)} days** (`{top_bp.road.total_distance_km} km` total) so climbs happen while it's cool and meals hit right on time.\n"
+            + (f"- **Hidden Fee Win:** {stay_analogy}" if stay_analogy else "")
+        )
+
+    if req.mode == "debate" or ("compare" in low_msg and alt_bp is not None) or "vs" in low_msg:
+        alt_core = format_amount_from_inr(alt_bp.total_core_landed_inr, ccy, fx) if alt_bp else fmt_core
+        alt_name = alt_bp.name if alt_bp else "Runner-Up Option"
+        return (
+            f"Comparing your top non-dominated blueprints for **{opt.trip_spec.origin} -> {opt.trip_spec.destination}**:\n\n"
+            f"### 🟢 Case for Pareto Knee: **{top_bp.name}** (**{fmt_core}**)\n"
+            f"- Best multi-objective balance (`Fatigue {top_bp.fatigue_score}` · `Score {top_bp.quality_score}`), saving **{fmt_save}** via {top_bp.stays[-1].best_channel if top_bp.stays else 'direct channel'} fee arbitrage.\n\n"
+            f"### 🔵 Case for Runner-Up: **{alt_name}** (**{alt_core}**)\n"
+            + (
+                f"- Trades `{format_amount_from_inr(abs(alt_bp.total_core_landed_inr - top_bp.total_core_landed_inr), ccy, fx)}` price delta for a diversified micro-location (`Fatigue {alt_bp.fatigue_score}` · `Score {alt_bp.quality_score}`).\n\n"
+                if alt_bp
+                else "- Provides backup availability across alternate portals.\n\n"
+            )
+            + f"### ⚖️ Verdict\nLock **{top_bp.name}** first for optimal landed value, and keep **{alt_name}** as your instant backup."
+        )
+
+    if req.mode == "devil" or re.search(r"\b(risk|stress|trap|catch|warn|safe|problem|audit)\b", low_msg):
+        callouts = "\n".join(f"- {c}" for c in top_bp.arbitrage_callouts[:3])
+        return (
+            f"Pre-mortem risk & logistics audit for **{opt.trip_spec.origin} -> {opt.trip_spec.destination}** (**{fmt_core}**):\n\n"
+            f"- **Pacing & Corridor Fatigue (`{top_bp.fatigue_score}/100`):** Total ground distance is **{top_bp.road.total_distance_km} km** (`{top_bp.road.total_drive_hours}h`). Stick to your **{opt.trip_spec.departure_time_pref}** rollout so forest checkposts, ghat curves, or airport transfers never slip into late-evening bottlenecks.\n"
+            f"- **Channel Cancellation Guardrail:** Before paying the lowest landed rate (**{fmt_save}** saved), verify free-cancellation cutoff dates when traveling with kids.\n"
+            f"{callouts}"
+        )
+
+    if re.search(r"\b(why|explain|how\s+did|fee|cheaper|arbitrage)\b", low_msg) and not updates:
+        callouts = "\n".join(f"- {c}" for c in top_bp.arbitrage_callouts[:3])
+        return (
+            f"Here is why **{top_bp.name}** wins as the Pareto Knee at **{fmt_core}** (saving **{fmt_save}**):\n\n"
+            f"{callouts}\n\n"
+            f"Across cost, road fatigue (`{top_bp.fatigue_score}/100`), and property quality (`{top_bp.quality_score}/100`), it sits closest to the Utopia point of all feasible combinations."
+        )
 
     transit_summary = ""
     if opt.trip_spec.pinned_stays:
@@ -931,43 +1272,117 @@ async def process_chat_turn(
     flight_summary = ""
     if top_bp.flights:
         f0 = top_bp.flights[0]
-        fmt_flt = format_amount_from_inr(f0.landed_family_total_inr, opt.active_currency, opt.fx_rates)
+        fmt_flt = format_amount_from_inr(f0.landed_family_total_inr, ccy, fx)
         flight_summary = (
             f" Shortlisted **{len(top_bp.flights)} round-trip flight options** led by **{f0.carrier}** "
             f"({f0.origin_iata or opt.trip_spec.origin} -> {f0.dest_iata or opt.trip_spec.destination}, **{fmt_flt}** for your party)."
         )
 
+    if questions:
+        return (
+            f"Mapped an initial **{len(opt.blueprints)}-blueprint Pareto & VRPTW plan** for "
+            f"**{opt.trip_spec.origin} -> {opt.trip_spec.destination}** (**{fmt_core}** core all-in, saving **{fmt_save}** across channels)."
+            f"{transit_summary}{flight_summary}\n\nTo tailor the final rooms, villa budget, and daily kid-friendly pacing, let me know:"
+        )
+
+    change_note = (
+        f"Locked updates ({', '.join(updates)}) and re-solved the N×N VRPTW matrix & Pareto frontier.{transit_summary}{flight_summary} "
+        if updates
+        else f"Re-verified live routing, 2-Opt VRPTW time windows, and cross-channel checkout math.{transit_summary}{flight_summary} "
+    )
+    return (
+        f"{change_note}Pareto Knee: **{top_bp.name}** at **{fmt_core}** core all-in "
+        f"(saving **{fmt_save}** across channels)."
+    )
+
+
+async def process_chat_turn(
+    req: ChatTurnRequest,
+    on_phase: Optional[PhaseEmitter] = None,
+) -> ChatTurnResponse:
+    """3-Stage Conversational Reasoning Planner:
+    Stage 1 (Gemini/Vertex JSON Spec Extractor + Deterministic NLP Fallback + UI Page-Driver) ->
+    Stage 2 (NSGA-II 3D Pareto + OSRM 2-Opt VRPTW Solver) ->
+    Stage 3 (Grounded Gemini 2.5 Thinking Synthesis + Built-In Multi-Persona Fallback).
+    """
+    api_key = (req.api_key or os.getenv("GEMINI_API_KEY") or "").strip()
+    model_name = (os.getenv("GEMINI_MODEL") or "gemini-2.5-flash").strip()
+
+    if on_phase:
+        await on_phase(
+            "Phase 1 · Intent & Constraints",
+            "Extracting structured trip intent, transit anchors, party constraints & UI actions...",
+        )
+
+    gemini_result = await _call_gemini_spec_extractor(req, api_key, model_name)
+
+    used_llm = False
+    engine_label = "⚡ TripSage 3-Stage Reasoning Engine"
+
+    if gemini_result is not None:
+        updated_spec, updates, needs_clar, questions, preface, llm_ms, s1_model, s1_prov = gemini_result
+        used_llm = True
+        engine_label = f"🧠 {s1_model} ({s1_prov})"
+        if updated_spec.destination.strip().lower() != req.current_spec.destination.strip().lower():
+            if not re.search(r"\b(inr|usd|eur|gbp|rupees?|dollars?|euros?|pounds?)\b|[₹$€£]", req.message, re.I):
+                updated_spec.currency = None
+        if updated_spec.pinned_stays and updated_spec.stay_strategy == "villas":
+            updated_spec.stay_strategy = "hybrid"
+    else:
+        updated_spec, updates, questions = _deterministic_nlp_extract(req)
+        needs_clar = bool(questions)
+        preface = ""
+        llm_ms = 0
+
+    opt = await solve_trip_pareto(updated_spec, on_phase=on_phase, persist_snapshot=False)
+    if gemini_result is not None:
+        opt.tool_trace.insert(
+            0,
+            ToolCallTrace(
+                phase="Phase 1 · Intent & Constraints",
+                tool_name=f"llm_spec_extract ({engine_label.replace('🧠 ', '')})",
+                latency_ms=llm_ms,
+                input_summary=req.message[:90],
+                finding_summary=", ".join(updates) if updates else "Confirmed conversational intent & constraints.",
+            ),
+        )
+
+    ui_cmds = _extract_ui_commands(req.message, len(opt.blueprints[0].days))
     expanded_pool = (
         updated_spec.stay_options_limit > req.current_spec.stay_options_limit
         or updated_spec.stay_pool_offset != req.current_spec.stay_pool_offset
     )
 
-    if expanded_pool:
-        dest_short = opt.trip_spec.destination.split(",")[0].strip()
-        shortlist = _format_stay_comparison_shortlist(opt)
-        reply = (
-            f"Expanded your **{dest_short}** stay search to **{len(opt.blueprints)} comparable options** "
-            f"(each solved end-to-end with your route{',' + transit_summary.rstrip('.') if transit_summary else ''}):\n\n"
-            f"{shortlist}\n\n"
-            f"All **{len(opt.blueprints)} Pareto cards** are now live on the right — click any card (or open **Cross-Channel Stay Arbitrage**) "
-            f"to switch your itinerary & map to that stay, or ask *\"show more stay options\"* again to load another fresh batch!"
+    if on_phase:
+        await on_phase(
+            "Phase 4 · Grounded Advisory Reasoning",
+            f"Synthesizing {req.mode.upper()} reasoning over solved Pareto blueprints & channel fee math...",
         )
-    elif questions:
-        reply = (
-            f"Mapped an initial **{len(opt.blueprints)}-blueprint Pareto & VRPTW plan** for "
-            f"**{opt.trip_spec.origin} -> {opt.trip_spec.destination}** (**{fmt_core}** core all-in, saving **{fmt_save}** across channels)."
-            f"{transit_summary}{flight_summary}\n\nTo tailor the final rooms, villa budget, and daily kid-friendly pacing, let me know:"
+
+    stage3 = None
+    if not expanded_pool:
+        stage3 = await _run_stage3_reasoning(req, opt, updates, api_key, model_name)
+
+    if stage3 is not None:
+        s3_md, s3_fups, s3_model, s3_prov, s3_ms = stage3
+        used_llm = True
+        engine_label = f"🧠 {s3_model} ({s3_prov} · {req.mode.capitalize()})"
+        reply = s3_md
+        suggested_prompts = s3_fups or _default_follow_up_prompts(opt)
+        opt.tool_trace.append(
+            ToolCallTrace(
+                phase="Phase 4 · Grounded Advisory Reasoning",
+                tool_name=f"gemini_grounded_reasoner ({s3_model})",
+                latency_ms=s3_ms,
+                input_summary=f"mode={req.mode} · {len(opt.blueprints)} Pareto blueprints",
+                finding_summary="Synthesized citation-grounded trade-offs & follow-up prompts.",
+            )
         )
     else:
-        change_note = (
-            f"Locked updates ({', '.join(updates)}) and re-solved the N×N VRPTW matrix & Pareto frontier.{transit_summary}{flight_summary} "
-            if updates
-            else f"Re-verified live routing, 2-Opt VRPTW time windows, and cross-channel checkout math.{transit_summary}{flight_summary} "
-        )
-        reply = (
-            f"{change_note}Pareto Knee: **{top_bp.name}** at **{fmt_core}** core all-in "
-            f"(saving **{fmt_save}** across channels)."
-        )
+        reply = _synthesize_builtin_reasoning_reply(req, opt, updates, questions, expanded_pool)
+        if preface and not reply.startswith(preface):
+            reply = f"{preface}\n\n{reply}"
+        suggested_prompts = _default_follow_up_prompts(opt)
 
     transcript = [m.model_dump() for m in req.history] + [
         {"role": "user", "content": req.message},
@@ -983,8 +1398,12 @@ async def process_chat_turn(
     return ChatTurnResponse(
         updated_spec=opt.trip_spec,
         assistant_reply=reply,
-        extracted_updates=updates or ["Live VRPTW & Pareto Re-Scan"],
-        needs_clarification=bool(questions),
+        extracted_updates=updates or (["Gemini Spec Synced"] if used_llm else ["Live VRPTW & Pareto Re-Scan"]),
+        needs_clarification=needs_clar or bool(questions),
         follow_up_questions=questions,
+        suggested_prompts=suggested_prompts,
+        ui_commands=ui_cmds,
+        engine_label=engine_label,
+        used_llm=used_llm,
         optimization=opt,
     )
