@@ -118,6 +118,14 @@ class FlightOption(BaseModel):
     savings_inr: int
     booking_channel: str
     booking_url: str = "https://www.google.com/travel/flights"
+    skyscanner_url: Optional[str] = None
+    inclusions: List[str] = Field(default_factory=list)
+    origin_iata: Optional[str] = None
+    dest_iata: Optional[str] = None
+    origin_lat: Optional[float] = None
+    origin_lng: Optional[float] = None
+    dest_lat: Optional[float] = None
+    dest_lng: Optional[float] = None
     price_provenance: PriceProvenance = "estimated_benchmark"
     provenance_label: str = "Distance Airfare Benchmark (Set SERPAPI_API_KEY for Live Fares)"
 

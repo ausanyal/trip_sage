@@ -149,6 +149,14 @@ export interface FlightOption {
   savings_inr: number;
   booking_channel: string;
   booking_url?: string;
+  skyscanner_url?: string | null;
+  inclusions?: string[];
+  origin_iata?: string | null;
+  dest_iata?: string | null;
+  origin_lat?: number | null;
+  origin_lng?: number | null;
+  dest_lat?: number | null;
+  dest_lng?: number | null;
   price_provenance?: PriceProvenance;
   provenance_label?: string;
 }

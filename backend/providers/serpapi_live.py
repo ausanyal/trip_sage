@@ -349,61 +349,90 @@ async def search_serpapi_flights(
 
         if isinstance(payload, dict):
             flights_pool = (payload.get("best_flights") or []) + (payload.get("other_flights") or [])
-            if flights_pool:
-                top_f = flights_pool[0]
-                total_price = int(top_f.get("price") or 0)
+            for _rank_in_hub, cand_f in enumerate(flights_pool[:3]):
+                total_price = int(cand_f.get("price") or 0)
                 if total_price > 0:
-                    evaluated.append((total_price, d_hub, ground_km, top_f))
+                    evaluated.append((total_price, d_hub, ground_km, cand_f))
 
     if not evaluated:
         return []
 
     # Joint airfare + ground-transfer cost comparison across candidate gateways
     evaluated.sort(key=lambda item: item[0] + int(item[2] * 28))
-    best_price, best_hub, best_km, best_f = evaluated[0]
+    worst_ref = max(item[0] for item in evaluated)
 
-    legs = best_f.get("flights") or [{}]
-    first_leg = legs[0]
-    last_leg = legs[-1]
-    airline = str(first_leg.get("airline") or "Verified Carrier")
-    flt_num = str(first_leg.get("flight_number") or f"{o_hub.iata}-{best_hub.iata}")
-    dep_time = str((first_leg.get("departure_airport") or {}).get("time") or "09:30")
-    arr_time = str((last_leg.get("arrival_airport") or {}).get("time") or "11:45")
-    tot_dur = int(best_f.get("total_duration") or 120)
-    stops_cnt = max(0, len(legs) - 1)
+    out_options: List[FlightOption] = []
+    seen_sigs: set[str] = set()
 
-    worst_ref = evaluated[-1][0] if len(evaluated) > 1 else int(round(best_price * 1.14))
-    ota_unopt = max(int(round(best_price * 1.12)), worst_ref)
-    savings = max(0, ota_unopt - best_price)
+    for idx_opt, (price_inr, hub_obj, km_val, f_raw) in enumerate(evaluated):
+        legs = f_raw.get("flights") or [{}]
+        first_leg = legs[0]
+        last_leg = legs[-1]
+        airline = str(first_leg.get("airline") or "Verified Carrier")
+        flt_num = str(first_leg.get("flight_number") or f"{o_hub.iata}-{hub_obj.iata}")
+        dep_time = str((first_leg.get("departure_airport") or {}).get("time") or "09:30")
+        arr_time = str((last_leg.get("arrival_airport") or {}).get("time") or "11:45")
+        tot_dur = int(f_raw.get("total_duration") or 120)
+        stops_cnt = max(0, len(legs) - 1)
 
-    gateway_note = (
-        f"Live Google Flights winner into {best_hub.iata} ({best_km:.0f} km transfer to {dest_short_name}) "
-        f"for {pax} travelers."
-    )
-    if len(evaluated) > 1:
-        alt_price, alt_hub, alt_km, _ = evaluated[1]
+        sig = f"{airline.lower()}:{hub_obj.iata}:{dep_time}:{price_inr}"
+        if sig in seen_sigs:
+            continue
+        seen_sigs.add(sig)
+
+        ota_unopt = max(int(round(price_inr * 1.12)), worst_ref)
+        savings = max(0, ota_unopt - price_inr)
+
         gateway_note = (
-            f"Live gateway arbitrage: {best_hub.iata} (₹{best_price:,}, {best_km:.0f} km drive) beats "
-            f"{alt_hub.iata} (₹{alt_price:,}, {alt_km:.0f} km drive)."
+            f"Live Google Flights quote into {hub_obj.iata} ({km_val:.0f} km transfer to {dest_short_name}) "
+            f"for {pax} travelers."
         )
+        if idx_opt == 0 and len(dest_hubs) > 1:
+            alt_hubs = [it for it in evaluated if it[1].iata != hub_obj.iata]
+            if alt_hubs:
+                alt_price, alt_hub, alt_km, _ = alt_hubs[0]
+                gateway_note = (
+                    f"Live gateway arbitrage: {hub_obj.iata} (₹{price_inr:,}, {km_val:.0f} km drive) vs. "
+                    f"{alt_hub.iata} (₹{alt_price:,}, {alt_km:.0f} km drive)."
+                )
 
-    return [
-        FlightOption(
-            id=f"live-flt-{o_hub.iata.lower()}-{best_hub.iata.lower()}",
-            carrier=airline,
-            flight_numbers=flt_num,
-            route_label=f"{o_hub.iata} -> {best_hub.iata} ({best_hub.name})",
-            gateway_hub_note=gateway_note,
-            depart_time=dep_time,
-            arrive_time=arr_time,
-            duration=f"{tot_dur // 60}h {tot_dur % 60:02d}m",
-            stops_label="Non-Stop" if stops_cnt == 0 else f"{stops_cnt} Stop",
-            landed_family_total_inr=best_price,
-            ota_unoptimized_inr=ota_unopt,
-            savings_inr=savings,
-            booking_channel="Google Flights Live Carrier Direct",
-            booking_url=f"https://www.google.com/travel/flights?q=Flights+from+{o_hub.iata}+to+{best_hub.iata}+on+{spec.start_date}",
-            price_provenance="live_verified",
-            provenance_label="Live Google Flights Fare (SerpApi)",
+        ext_list = [str(x) for x in (first_leg.get("extensions") or [])[:2] if x]
+        inclusions = ext_list or ["Live Round-Trip Quote", f"{pax} Travelers"]
+
+        out_options.append(
+            FlightOption(
+                id=f"live-flt-{o_hub.iata.lower()}-{hub_obj.iata.lower()}-{len(out_options) + 1}",
+                carrier=airline,
+                flight_numbers=flt_num,
+                route_label=f"{o_hub.iata} -> {hub_obj.iata} ({hub_obj.name})",
+                gateway_hub_note=gateway_note,
+                depart_time=dep_time,
+                arrive_time=arr_time,
+                duration=f"{tot_dur // 60}h {tot_dur % 60:02d}m",
+                stops_label="Non-Stop" if stops_cnt == 0 else f"{stops_cnt} Stop",
+                landed_family_total_inr=price_inr,
+                ota_unoptimized_inr=ota_unopt,
+                savings_inr=savings,
+                booking_channel="Google Flights Live Carrier Direct",
+                booking_url=(
+                    f"https://www.google.com/travel/flights?q=Flights+from+{o_hub.iata}+to+{hub_obj.iata}"
+                    f"+on+{spec.start_date}+return+{spec.end_date}+{quote_plus(airline)}+{quote_plus(dep_time)}"
+                ),
+                skyscanner_url=(
+                    f"https://www.skyscanner.co.in/transport/flights/{o_hub.iata.lower()}/{hub_obj.iata.lower()}/"
+                ),
+                inclusions=inclusions,
+                origin_iata=o_hub.iata,
+                dest_iata=hub_obj.iata,
+                origin_lat=o_hub.lat,
+                origin_lng=o_hub.lng,
+                dest_lat=hub_obj.lat,
+                dest_lng=hub_obj.lng,
+                price_provenance="live_verified",
+                provenance_label="Live Google Flights Fare (SerpApi)",
+            )
         )
-    ]
+        if len(out_options) >= 4:
+            break
+
+    return out_options

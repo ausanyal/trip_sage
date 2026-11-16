@@ -84,15 +84,28 @@ AIRPORT_INDEX: List[AirportHub] = [
     AirportHub("DXB", "Dubai International", "Dubai", 25.2532, 55.3657),
     AirportHub("AUH", "Zayed International", "Abu Dhabi", 24.4439, 54.6511),
     AirportHub("DOH", "Hamad International", "Doha", 25.2731, 51.6081),
+    AirportHub("CMB", "Bandaranaike International", "Colombo", 7.1808, 79.8841),
+    AirportHub("MLE", "Velana International", "Malé", 4.1918, 73.5291),
     AirportHub("SIN", "Singapore Changi", "Singapore", 1.3644, 103.9915),
+    AirportHub("KUL", "Kuala Lumpur International", "Kuala Lumpur", 2.7456, 101.7099),
     AirportHub("BKK", "Suvarnabhumi", "Bangkok", 13.6900, 100.7501),
+    AirportHub("DMK", "Don Mueang International", "Bangkok North", 13.9126, 100.6068, is_regional=True),
+    AirportHub("HKT", "Phuket International", "Phuket", 8.1132, 98.3169),
     AirportHub("DPS", "Ngurah Rai International", "Bali", -8.7482, 115.1672),
+    AirportHub("SUB", "Juanda International", "Surabaya", -7.3798, 112.7869, is_regional=True),
+    AirportHub("CGK", "Soekarno-Hatta International", "Jakarta", -6.1256, 106.6559),
+    AirportHub("DAD", "Da Nang International", "Da Nang", 16.0439, 108.1994),
+    AirportHub("HAN", "Noi Bai International", "Hanoi", 21.2212, 105.8072),
+    AirportHub("SGN", "Tan Son Nhat International", "Ho Chi Minh City", 10.8188, 106.6520),
+    AirportHub("ICN", "Incheon International", "Seoul", 37.4602, 126.4407),
     AirportHub("NRT", "Narita International", "Tokyo", 35.7720, 140.3929),
     AirportHub("LHR", "London Heathrow", "London", 51.4700, -0.4543),
     AirportHub("LGW", "London Gatwick", "London South", 51.1537, -0.1821, is_regional=True),
     AirportHub("CDG", "Charles de Gaulle", "Paris", 49.0097, 2.5479),
     AirportHub("FRA", "Frankfurt Airport", "Frankfurt", 50.0379, 8.5622),
     AirportHub("FCO", "Leonardo da Vinci Fiumicino", "Rome", 41.8003, 12.2389),
+    AirportHub("BCN", "Josep Tarradellas El Prat", "Barcelona", 41.2974, 2.0833),
+    AirportHub("ATH", "Athens International", "Athens", 37.9364, 23.9445),
     AirportHub("AMS", "Amsterdam Schiphol", "Amsterdam", 52.3105, 4.7683),
     AirportHub("ZRH", "Zurich Airport", "Zurich", 47.4647, 8.5492),
     AirportHub("JFK", "John F. Kennedy Intl", "New York", 40.6413, -73.7781),
@@ -101,6 +114,30 @@ AIRPORT_INDEX: List[AirportHub] = [
     AirportHub("SFO", "San Francisco Intl", "San Francisco", 37.6213, -122.3790),
     AirportHub("SYD", "Sydney Kingsford Smith", "Sydney", -33.9399, 151.1753),
 ]
+
+# Country-level destination resolver so broad country names ("Indonesia", "Thailand", "Japan")
+# resolve to their primary visitor hub rather than an uninhabited geographic centroid.
+COUNTRY_VISITOR_GATEWAYS: Dict[str, Tuple[str, str, float, float, str]] = {
+    "indonesia": ("Bali", "Bali (Denpasar / Ubud), Indonesia", -8.6500, 115.2167, "id"),
+    "thailand": ("Phuket", "Phuket & Andaman Coast, Thailand", 7.8804, 98.3923, "th"),
+    "vietnam": ("Da Nang", "Da Nang & Hoi An, Vietnam", 16.0544, 108.2022, "vn"),
+    "sri lanka": ("Colombo", "Colombo & Galle Coast, Sri Lanka", 6.9271, 79.8612, "lk"),
+    "maldives": ("Malé", "Malé Atoll, Maldives", 4.1755, 73.5093, "mv"),
+    "malaysia": ("Kuala Lumpur", "Kuala Lumpur, Malaysia", 3.1390, 101.6869, "my"),
+    "singapore": ("Singapore", "Singapore", 1.3521, 103.8198, "sg"),
+    "japan": ("Tokyo", "Tokyo, Japan", 35.6762, 139.6503, "jp"),
+    "south korea": ("Seoul", "Seoul, South Korea", 37.5665, 126.9780, "kr"),
+    "uae": ("Dubai", "Dubai, United Arab Emirates", 25.2048, 55.2708, "ae"),
+    "united arab emirates": ("Dubai", "Dubai, United Arab Emirates", 25.2048, 55.2708, "ae"),
+    "switzerland": ("Zurich", "Zurich & Lucerne, Switzerland", 47.3769, 8.5417, "ch"),
+    "italy": ("Rome", "Rome, Italy", 41.9028, 12.4964, "it"),
+    "france": ("Paris", "Paris, France", 48.8566, 2.3522, "fr"),
+    "spain": ("Barcelona", "Barcelona, Spain", 41.3874, 2.1686, "es"),
+    "greece": ("Athens", "Athens, Greece", 37.9838, 23.7275, "gr"),
+    "uk": ("London", "London, United Kingdom", 51.5072, -0.1276, "gb"),
+    "united kingdom": ("London", "London, United Kingdom", 51.5072, -0.1276, "gb"),
+    "australia": ("Sydney", "Sydney, Australia", -33.8688, 151.2093, "au"),
+}
 
 # Offline coordinate fallback index used ONLY when outbound network/Nominatim is unreachable
 OFFLINE_GAZETTEER: Dict[str, Tuple[float, float, str]] = {
@@ -177,7 +214,21 @@ async def geocode_place(query: str) -> GeoLocation:
     if key in _GEOCODE_MEM:
         return _GEOCODE_MEM[key]
 
-    sql_key = f"geocode:v3:{key}"
+    if key in COUNTRY_VISITOR_GATEWAYS:
+        short_nm, disp_nm, glat, glng, gcc = COUNTRY_VISITOR_GATEWAYS[key]
+        loc = GeoLocation(
+            query=query,
+            short_name=short_nm,
+            display_name=disp_nm,
+            lat=glat,
+            lng=glng,
+            country_code=gcc,
+            source="country_gateway_hub",
+        )
+        _GEOCODE_MEM[key] = loc
+        return loc
+
+    sql_key = f"geocode:v4:{key}"
     cached = cache_get_json(sql_key)
     if isinstance(cached, dict) and "lat" in cached and "lng" in cached:
         loc = GeoLocation(**cached)

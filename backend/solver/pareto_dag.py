@@ -8,10 +8,12 @@ from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 from currency import get_live_fx_rates, infer_currency_from_countries
 from db import save_trip_snapshot
 from models import (
+    FlightOption,
     ItineraryDay,
     OptimizationResponse,
     ParetoBlueprint,
     PinnedStaySpec,
+    PlatformCoverageNote,
     RoadSegment,
     RoadSummary,
     StayCandidate,
@@ -110,6 +112,8 @@ async def _build_vrptw_itinerary_for_stay(
     highway_segments: List[RoadSegment],
     pois: List[DiscoveredPOI],
     has_flights: bool,
+    top_flight: Optional[FlightOption] = None,
+    flight_count: int = 0,
 ) -> Tuple[List[ItineraryDay], List[RoadSegment], str]:
     """Builds a full multi-day itinerary where destination exploration days are solved via
     OSRM N×N travel-time matrices + K-medoids clustering + 2-Opt VRPTW local search.
@@ -263,22 +267,56 @@ async def _build_vrptw_itinerary_for_stay(
                 start_m = max(6 * 60 + 30, 19 * 60 + 30 - leg_mins)
             arr_m = start_m + leg_mins
 
+            is_fly_arrival = bool(has_flights and not outbound_stays)
+            arr_flt_tag = (
+                f"{top_flight.origin_iata} -> {top_flight.dest_iata}"
+                if (top_flight and top_flight.origin_iata and top_flight.dest_iata)
+                else f"{origin_geo.short_name} -> {dest_geo.short_name}"
+            )
             stops.append(
                 TimelineStop(
                     id=f"d{day_num}-s1",
-                    time_window=f"{format_clock_min(start_m)} – {format_clock_min(arr_m)}",
+                    time_window=(
+                        f"{top_flight.depart_time} – {top_flight.arrive_time}"
+                        if (is_fly_arrival and top_flight)
+                        else f"{format_clock_min(start_m)} – {format_clock_min(arr_m)}"
+                    ),
                     title=(
-                        f"Gateway Flight + Scenic Transfer into {dest_geo.short_name}"
-                        if has_flights and not outbound_stays
+                        f"Outbound Flight ({arr_flt_tag}) + Transfer into {dest_geo.short_name}"
+                        if is_fly_arrival
                         else f"Daylight Corridor Drive: {prev_name} -> {dest_geo.short_name}"
                     ),
-                    location_label=leg.highway_label if leg else f"{prev_name} -> {dest_geo.short_name}",
-                    category="flight" if (has_flights and not outbound_stays) else "drive",
-                    lat=round(((outbound_stays[-1].lat if outbound_stays else origin_geo.lat) + dest_stay.lat) / 2, 4),
-                    lng=round(((outbound_stays[-1].lng if outbound_stays else origin_geo.lng) + dest_stay.lng) / 2, 4),
-                    duration_label=drive_lbl,
-                    description=f"Daylight arrival approach into {dest_geo.short_name} via verified highway corridor.",
-                    insider_tip=leg.gate_alert if leg and leg.gate_alert else "Daytime arrival ensures stress-free check-in.",
+                    location_label=(
+                        f"{top_flight.carrier} ({top_flight.stops_label}) + {leg.highway_label if leg else 'Airport Transfer'}"
+                        if (is_fly_arrival and top_flight)
+                        else (leg.highway_label if leg else f"{prev_name} -> {dest_geo.short_name}")
+                    ),
+                    category="flight" if is_fly_arrival else "drive",
+                    lat=(
+                        round(top_flight.dest_lat, 4)
+                        if (is_fly_arrival and top_flight and top_flight.dest_lat is not None)
+                        else round(((outbound_stays[-1].lat if outbound_stays else origin_geo.lat) + dest_stay.lat) / 2, 4)
+                    ),
+                    lng=(
+                        round(top_flight.dest_lng, 4)
+                        if (is_fly_arrival and top_flight and top_flight.dest_lng is not None)
+                        else round(((outbound_stays[-1].lng if outbound_stays else origin_geo.lng) + dest_stay.lng) / 2, 4)
+                    ),
+                    duration_label=(
+                        f"{top_flight.duration} flight + {drive_lbl} transfer"
+                        if (is_fly_arrival and top_flight)
+                        else drive_lbl
+                    ),
+                    description=(
+                        f"Fly {arr_flt_tag} ({flight_count} carrier options compared above) and transfer straight to {dest_geo.short_name}."
+                        if is_fly_arrival
+                        else f"Daylight arrival approach into {dest_geo.short_name} via verified highway corridor."
+                    ),
+                    insider_tip=(
+                        top_flight.gateway_hub_note
+                        if (is_fly_arrival and top_flight)
+                        else (leg.gate_alert if leg and leg.gate_alert else "Daytime arrival ensures stress-free check-in.")
+                    ),
                     drive_from_prev_mins=leg_mins,
                 )
             )
@@ -369,20 +407,42 @@ async def _build_vrptw_itinerary_for_stay(
                     dietary_note=lunch_spot.dietary_note,
                 )
             )
+            is_fly_return = bool(has_flights and not return_stays)
+            ret_flt_tag = (
+                f"{top_flight.dest_iata} -> {top_flight.origin_iata}"
+                if (top_flight and top_flight.origin_iata and top_flight.dest_iata)
+                else f"{start_from} -> {origin_geo.short_name}"
+            )
             stops.append(
                 TimelineStop(
                     id=f"d{day_num}-s2",
                     time_window=f"{format_clock_min(ret_min_pref)} – {format_clock_min(ret_min_pref + leg_mins)}",
                     title=(
-                        f"Return Flight + Homeward Transfer to {origin_geo.short_name}"
-                        if has_flights and not return_stays
+                        f"Airport Transfer + Return Flight ({ret_flt_tag})"
+                        if is_fly_return
                         else f"Homebound Cruise: {start_from} -> {origin_geo.short_name}"
                     ),
-                    location_label=leg.highway_label if leg else f"{start_from} -> {origin_geo.short_name}",
-                    category="flight" if (has_flights and not return_stays) else "drive",
-                    lat=origin_geo.lat,
-                    lng=origin_geo.lng,
-                    duration_label=drive_lbl,
+                    location_label=(
+                        f"{top_flight.carrier} Round-Trip Return + {leg.highway_label if leg else 'Airport Drop'}"
+                        if (is_fly_return and top_flight)
+                        else (leg.highway_label if leg else f"{start_from} -> {origin_geo.short_name}")
+                    ),
+                    category="flight" if is_fly_return else "drive",
+                    lat=(
+                        round(top_flight.dest_lat, 4)
+                        if (is_fly_return and top_flight and top_flight.dest_lat is not None)
+                        else origin_geo.lat
+                    ),
+                    lng=(
+                        round(top_flight.dest_lng, 4)
+                        if (is_fly_return and top_flight and top_flight.dest_lng is not None)
+                        else origin_geo.lng
+                    ),
+                    duration_label=(
+                        f"{drive_lbl} transfer + {top_flight.duration} flight"
+                        if (is_fly_return and top_flight)
+                        else drive_lbl
+                    ),
                     description=f"Smooth return leg back to {spec.origin}, wrapping up your {total_days}-day trip.",
                     drive_from_prev_mins=leg_mins,
                 )
@@ -569,7 +629,9 @@ async def solve_trip_pareto(
 
     leg_specs: List[Tuple[str, int, GeoLocation, GeoLocation]] = []
     if spec.transport_mode in ("flight", "hybrid") and not active_pins:
-        dest_hubs = nearest_airports(dest_geo.lat, dest_geo.lng, max_km=280.0, limit=1)
+        dest_hubs = nearest_airports(dest_geo.lat, dest_geo.lng, max_km=380.0, limit=1)
+        if not dest_hubs:
+            dest_hubs = nearest_airports(dest_geo.lat, dest_geo.lng, max_km=2500.0, limit=1)
         if dest_hubs:
             hub, _ = dest_hubs[0]
             hub_geo = GeoLocation(
@@ -633,8 +695,8 @@ async def solve_trip_pareto(
         )
     t_dag_start = time.perf_counter()
     clearance_mm, km_per_l, _ = parse_vehicle_profile(spec.vehicle_name)
-    flight_landed = sum(f.landed_family_total_inr for f in flights)
-    flight_unopt = sum(f.ota_unoptimized_inr for f in flights)
+    flight_landed = flights[0].landed_family_total_inr if flights else 0
+    flight_unopt = flights[0].ota_unoptimized_inr if flights else 0
     pax = max(1, spec.party.adults + spec.party.children)
     est_dining_activities = int(round(pax * 820 * (total_nights + 1), -2))
 
@@ -653,6 +715,8 @@ async def solve_trip_pareto(
                 highway_segments=highway_segments,
                 pois=pois,
                 has_flights=bool(flights),
+                top_flight=flights[0] if flights else None,
+                flight_count=len(flights),
             )
             for chosen_stay in dest_candidates
         ]
@@ -798,6 +862,21 @@ async def solve_trip_pareto(
             ),
         ),
     ]
+
+    if flights:
+        f0 = flights[0]
+        coverage_notes = [
+            PlatformCoverageNote(
+                platform="Google Flights & Skyscanner Gateways",
+                status="live_scanned" if f0.price_provenance == "live_verified" else "matched",
+                listings_scanned=len(flights),
+                note=(
+                    f"Compared {len(flights)} round-trip carrier & gateway options "
+                    f"({f0.origin_iata or origin_geo.short_name} -> {f0.dest_iata or dest_geo.short_name}); "
+                    f"best value saves ₹{f0.savings_inr:,}."
+                ),
+            )
+        ] + list(coverage_notes)
 
     spec_out = spec.model_copy(deep=True)
     if spec_out.currency is None:

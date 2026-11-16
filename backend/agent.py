@@ -497,8 +497,24 @@ def _deterministic_nlp_extract(
     elif "hybrid" in lower and "hybrid stay" not in lower and "road trip" not in lower:
         spec.transport_mode = "hybrid"
         updates.append("Transport Mode -> Hybrid (Fly + Drive)")
-    elif any(p in lower for p in ["flight only", "fly + stay", "flights only"]):
+    elif any(
+        p in lower
+        for p in [
+            "flight only",
+            "fly + stay",
+            "fly and stay",
+            "flights only",
+            "by flight",
+            "with flights",
+            "fly to ",
+            "fly from ",
+            "flying to ",
+            "flying from ",
+        ]
+    ):
         spec.transport_mode = "flight"
+        if spec.vehicle_name in ("Family SUV (Own Car)", "Self-Drive SUV"):
+            spec.vehicle_name = "Airport Private Transfer SUV"
         updates.append("Transport Mode -> Fly + Stay")
     elif any(p in lower for p in ["road trip", "own car", "pure road", "drive from"]):
         spec.transport_mode = "road"
@@ -736,6 +752,14 @@ async def process_chat_turn(
         top_bp = opt.blueprints[0]
         fmt_core = format_amount_from_inr(top_bp.total_core_landed_inr, opt.active_currency, opt.fx_rates)
         fmt_save = format_amount_from_inr(top_bp.total_arbitrage_savings_inr, opt.active_currency, opt.fx_rates)
+        flt_note = ""
+        if top_bp.flights:
+            f0 = top_bp.flights[0]
+            fmt_flt = format_amount_from_inr(f0.landed_family_total_inr, opt.active_currency, opt.fx_rates)
+            flt_note = (
+                f" Includes **{len(top_bp.flights)} round-trip flight options** led by **{f0.carrier}** "
+                f"({f0.origin_iata or opt.trip_spec.origin} -> {f0.dest_iata or opt.trip_spec.destination}, **{fmt_flt}** for your party)."
+            )
         expanded_pool = (
             updated_spec.stay_options_limit > req.current_spec.stay_options_limit
             or updated_spec.stay_pool_offset != req.current_spec.stay_pool_offset
@@ -755,7 +779,7 @@ async def process_chat_turn(
                 f"{preface + ' ' if preface else ''}"
                 f"Solved **{len(opt.blueprints)} non-dominated Pareto blueprints** for **{opt.trip_spec.origin} -> {opt.trip_spec.destination}** — "
                 f"Pareto Knee **{top_bp.name}** lands at **{fmt_core}** core all-in "
-                f"(saving **{fmt_save}** via cross-channel arbitrage)."
+                f"(saving **{fmt_save}** via cross-channel arbitrage).{flt_note}"
             )
         if questions:
             reply += "\n\nTo fine-tune this draft itinerary, let me know your preferences on:"
@@ -790,6 +814,15 @@ async def process_chat_turn(
         uniq_stops = list(dict.fromkeys(f"{p.property_name} ({p.check_in})" for p in opt.trip_spec.pinned_stays))
         transit_summary = f" Anchored transit stopovers at **{', '.join(uniq_stops)}**."
 
+    flight_summary = ""
+    if top_bp.flights:
+        f0 = top_bp.flights[0]
+        fmt_flt = format_amount_from_inr(f0.landed_family_total_inr, opt.active_currency, opt.fx_rates)
+        flight_summary = (
+            f" Shortlisted **{len(top_bp.flights)} round-trip flight options** led by **{f0.carrier}** "
+            f"({f0.origin_iata or opt.trip_spec.origin} -> {f0.dest_iata or opt.trip_spec.destination}, **{fmt_flt}** for your party)."
+        )
+
     expanded_pool = (
         updated_spec.stay_options_limit > req.current_spec.stay_options_limit
         or updated_spec.stay_pool_offset != req.current_spec.stay_pool_offset
@@ -809,13 +842,13 @@ async def process_chat_turn(
         reply = (
             f"Mapped an initial **{len(opt.blueprints)}-blueprint Pareto & VRPTW plan** for "
             f"**{opt.trip_spec.origin} -> {opt.trip_spec.destination}** (**{fmt_core}** core all-in, saving **{fmt_save}** across channels)."
-            f"{transit_summary}\n\nTo tailor the final rooms, villa budget, and daily kid-friendly pacing, let me know:"
+            f"{transit_summary}{flight_summary}\n\nTo tailor the final rooms, villa budget, and daily kid-friendly pacing, let me know:"
         )
     else:
         change_note = (
-            f"Locked updates ({', '.join(updates)}) and re-solved the N×N VRPTW matrix & Pareto frontier.{transit_summary} "
+            f"Locked updates ({', '.join(updates)}) and re-solved the N×N VRPTW matrix & Pareto frontier.{transit_summary}{flight_summary} "
             if updates
-            else f"Re-verified live routing, 2-Opt VRPTW time windows, and cross-channel checkout math.{transit_summary} "
+            else f"Re-verified live routing, 2-Opt VRPTW time windows, and cross-channel checkout math.{transit_summary}{flight_summary} "
         )
         reply = (
             f"{change_note}Pareto Knee: **{top_bp.name}** at **{fmt_core}** core all-in "

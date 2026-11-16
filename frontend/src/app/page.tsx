@@ -288,6 +288,7 @@ export default function TripSageWorkspacePage() {
   const [currency, setCurrency] = useState<CurrencyCode>("INR");
   const [fxRates, setFxRates] = useState<Record<string, number>>(DEFAULT_FX_RATES);
   const [selectedBlueprintIdx, setSelectedBlueprintIdx] = useState<number>(0);
+  const [selectedFlightIdx, setSelectedFlightIdx] = useState<number>(0);
   const [activeDay, setActiveDay] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>("itinerary");
   const [stopFilter, setStopFilter] = useState<StopFilter>("all");
@@ -411,6 +412,7 @@ export default function TripSageWorkspacePage() {
             if (opt.fx_rates) setFxRates(opt.fx_rates);
             if (opt.active_currency) setCurrency(opt.active_currency);
             setSelectedBlueprintIdx(0);
+            setSelectedFlightIdx(0);
             setActiveDay(null);
             setHasActiveTrip(true);
             const restoredMsgs: ChatMessage[] =
@@ -564,6 +566,28 @@ export default function TripSageWorkspacePage() {
   const blueprint =
     optimization.blueprints[selectedBlueprintIdx] ?? optimization.blueprints[0];
 
+  const safeFlightIdx =
+    selectedFlightIdx < blueprint.flights.length ? selectedFlightIdx : 0;
+  const activeFlight =
+    blueprint.flights[safeFlightIdx] ?? blueprint.flights[0] ?? null;
+  const baseFlightLanded = blueprint.flights[0]?.landed_family_total_inr ?? 0;
+  const baseFlightUnopt = blueprint.flights[0]?.ota_unoptimized_inr ?? 0;
+  const displayedCoreLandedInr =
+    blueprint.total_core_landed_inr -
+    baseFlightLanded +
+    (activeFlight?.landed_family_total_inr ?? 0);
+  const displayedUnoptBaselineInr =
+    blueprint.unoptimized_baseline_inr -
+    baseFlightUnopt +
+    (activeFlight?.ota_unoptimized_inr ?? 0);
+  const displayedSavingsInr = Math.max(
+    0,
+    blueprint.total_arbitrage_savings_inr -
+      (blueprint.flights[0]?.savings_inr ?? 0) +
+      (activeFlight?.savings_inr ?? 0),
+    displayedUnoptBaselineInr - displayedCoreLandedInr
+  );
+
   const money = useCallback(
     (amountInr: number) => formatMoney(amountInr, currency, fxRates),
     [currency, fxRates]
@@ -588,6 +612,7 @@ export default function TripSageWorkspacePage() {
       entry.messages?.length ? entry.messages : buildWelcomeConversation()
     );
     setSelectedBlueprintIdx(0);
+    setSelectedFlightIdx(0);
     setActiveDay(null);
     setActiveRecentId(entry.id);
     setHasActiveTrip(true);
@@ -652,8 +677,18 @@ export default function TripSageWorkspacePage() {
           window.history.replaceState(null, "", `/?trip=${updated.trip_id}`);
         }
         setSelectedBlueprintIdx(0);
+        setSelectedFlightIdx(0);
         setActiveDay(null);
         setHasActiveTrip(true);
+
+        const topFlt = updated.blueprints[0]?.flights?.[0];
+        const fltSyncSuffix = topFlt
+          ? ` Shortlisted ${updated.blueprints[0].flights.length} round-trip flight options led by ${topFlt.carrier} (${topFlt.origin_iata ?? updated.trip_spec.origin} -> ${topFlt.dest_iata ?? updated.trip_spec.destination}, ${formatMoney(
+              topFlt.landed_family_total_inr,
+              updated.active_currency ?? currency,
+              updated.fx_rates ?? fxRates
+            )}).`
+          : "";
 
         const syncMsg: ChatMessage = {
           id: `sync-${Date.now()}`,
@@ -669,7 +704,7 @@ export default function TripSageWorkspacePage() {
             updated.blueprints[0].total_arbitrage_savings_inr,
             updated.active_currency ?? currency,
             updated.fx_rates ?? fxRates
-          )} across channels).`,
+          )} across channels).${fltSyncSuffix}`,
         };
         setMessages((prev) => {
           const nextMsgs = [...prev, syncMsg];
@@ -756,6 +791,7 @@ export default function TripSageWorkspacePage() {
             );
           }
           setSelectedBlueprintIdx(0);
+          setSelectedFlightIdx(0);
           setActiveDay(null);
           setHasActiveTrip(true);
           saveRecentTripToBrowser(payload.optimization, nextMsgs);
@@ -816,6 +852,7 @@ export default function TripSageWorkspacePage() {
       setOptimization(data);
       setCurrency("INR");
       setSelectedBlueprintIdx(0);
+      setSelectedFlightIdx(0);
       setActiveDay(null);
       setMessages(sampleMsgs);
       setHasActiveTrip(true);
@@ -864,6 +901,161 @@ export default function TripSageWorkspacePage() {
       );
     }
     return true;
+  };
+
+  const renderFlightOptionsList = (radioGroupName: string) => {
+    const tierBadges = [
+      "Best Value Saver",
+      "Fastest Full-Service",
+      "Flexible Split-Return",
+      "Alt Gateway Hub",
+    ];
+    return (
+      <ul role="list" className="flight-options-grid">
+        {blueprint.flights.map((flt, idx) => {
+          const isChosen = idx === safeFlightIdx;
+          const tierLabel = tierBadges[idx] ?? `Option #${idx + 1}`;
+          const shortProv =
+            flt.price_provenance === "live_verified"
+              ? "Live Google Flights"
+              : "Airfare Benchmark";
+          const routeShort =
+            flt.origin_iata && flt.dest_iata
+              ? `${flt.origin_iata} → ${flt.dest_iata}`
+              : flt.route_label.split("(")[0].trim();
+
+          return (
+            <li key={`${radioGroupName}-${flt.id}`} className="card-container">
+              <article
+                className="flight-option-card"
+                data-selected={String(isChosen)}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "0.35rem",
+                  }}
+                >
+                  <span
+                    className={`badge ${
+                      idx === 0 ? "badge-emerald" : "badge-gold"
+                    }`}
+                  >
+                    <Plane size={11} aria-hidden="true" /> {tierLabel}
+                  </span>
+                  <span
+                    className={`badge ${
+                      flt.price_provenance === "live_verified"
+                        ? "badge-emerald"
+                        : "badge-route"
+                    }`}
+                    title={flt.provenance_label}
+                  >
+                    <Info size={11} aria-hidden="true" /> {shortProv}
+                  </span>
+                </div>
+
+                <label className="flight-select-label">
+                  <input
+                    type="radio"
+                    name={radioGroupName}
+                    checked={isChosen}
+                    onChange={() => setSelectedFlightIdx(idx)}
+                  />
+                  <span style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
+                    <span style={{ fontWeight: 800, fontSize: "0.93rem", lineHeight: 1.28 }}>
+                      {flt.carrier}
+                    </span>
+                    <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--route-blue)" }}>
+                      {routeShort} · {flt.depart_time} – {flt.arrive_time} ({flt.duration})
+                    </span>
+                    <span style={{ fontSize: "0.74rem", color: "var(--text-muted)" }}>
+                      {flt.stops_label} · {flt.flight_numbers}
+                    </span>
+                  </span>
+                </label>
+
+                <p style={{ margin: 0, fontSize: "0.77rem", color: "var(--text-secondary)" }}>
+                  {flt.gateway_hub_note}
+                </p>
+
+                {flt.inclusions && flt.inclusions.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                    {flt.inclusions.map((inc, iIdx) => (
+                      <span
+                        key={iIdx}
+                        style={{
+                          fontSize: "0.7rem",
+                          fontWeight: 600,
+                          padding: "0.14rem 0.45rem",
+                          borderRadius: "0.4rem",
+                          background: "var(--bg-subtle)",
+                          color: "var(--text-secondary)",
+                        }}
+                      >
+                        {inc}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flight-card-footer">
+                  <div>
+                    <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 700 }}>
+                      ROUND-TRIP ({optimization.trip_spec.party.adults + optimization.trip_spec.party.children} TRAVELERS)
+                    </div>
+                    <strong style={{ fontSize: "1.12rem", color: "var(--accent-primary)" }}>
+                      {money(flt.landed_family_total_inr)}
+                    </strong>
+                    <div style={{ fontSize: "0.72rem", color: "var(--accent-primary)", fontWeight: 700 }}>
+                      Saves {money(flt.savings_inr)} vs. OTA
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+                    <a
+                      href={flt.booking_url ?? "https://www.google.com/travel/flights"}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn"
+                      aria-label={`Search ${flt.carrier} ${routeShort} (${flt.depart_time}) on Google Flights`}
+                      style={{
+                        textDecoration: "none",
+                        minBlockSize: "2.1rem",
+                        padding: "0.25rem 0.55rem",
+                        fontSize: "0.74rem",
+                      }}
+                    >
+                      Google Flights <ExternalLink size={12} aria-hidden="true" />
+                    </a>
+                    {flt.skyscanner_url && (
+                      <a
+                        href={flt.skyscanner_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn"
+                        aria-label={`Compare ${flt.origin_iata ?? "origin"} to ${flt.dest_iata ?? "destination"} fares on Skyscanner`}
+                        style={{
+                          textDecoration: "none",
+                          minBlockSize: "2.1rem",
+                          padding: "0.25rem 0.55rem",
+                          fontSize: "0.74rem",
+                        }}
+                      >
+                        Skyscanner <ExternalLink size={12} aria-hidden="true" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </article>
+            </li>
+          );
+        })}
+      </ul>
+    );
   };
 
   const stopCategoryIcon = (cat: TimelineStop["category"]) => {
@@ -976,7 +1168,7 @@ export default function TripSageWorkspacePage() {
           {hasActiveTrip && (
             <span className="badge badge-emerald" style={{ padding: "0.32rem 0.65rem", fontSize: "0.76rem" }}>
               <TrendingDown size={13} aria-hidden="true" />
-              Saved {money(blueprint.total_arbitrage_savings_inr)}
+              Saved {money(displayedSavingsInr)}
             </span>
           )}
 
@@ -1150,9 +1342,9 @@ export default function TripSageWorkspacePage() {
                 </div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
                   <span style={{ fontSize: "1.45rem", fontWeight: 900, color: "var(--accent-primary)" }}>
-                    {money(blueprint.total_core_landed_inr)}
+                    {money(displayedCoreLandedInr)}
                   </span>
-                  {blueprint.unoptimized_baseline_inr > blueprint.total_core_landed_inr && (
+                  {displayedUnoptBaselineInr > displayedCoreLandedInr && (
                     <span
                       style={{
                         fontSize: "0.84rem",
@@ -1160,10 +1352,15 @@ export default function TripSageWorkspacePage() {
                         color: "var(--text-muted)",
                       }}
                     >
-                      {money(blueprint.unoptimized_baseline_inr)}
+                      {money(displayedUnoptBaselineInr)}
                     </span>
                   )}
                 </div>
+                {activeFlight && (
+                  <div style={{ fontSize: "0.73rem", color: "var(--gold-accent)", fontWeight: 700 }}>
+                    Includes {activeFlight.origin_iata ?? "Outbound"} → {activeFlight.dest_iata ?? "Return"} round-trip ({money(activeFlight.landed_family_total_inr)} for party)
+                  </div>
+                )}
                 <div style={{ fontSize: "0.73rem", color: "var(--text-muted)" }}>
                   + ~{money(blueprint.dining_and_activities_est_inr)} est. {blueprint.days.length}-day dining &amp; activity tickets
                 </div>
@@ -1309,9 +1506,44 @@ export default function TripSageWorkspacePage() {
             </div>
           </section>
 
+          {/* First-Class Gateway Flight & Carrier Arbitrage Selector */}
+          {blueprint.flights.length > 0 && (
+            <div>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "0.45rem",
+                  marginBlockEnd: "0.65rem",
+                }}
+              >
+                <h2
+                  style={{
+                    margin: 0,
+                    fontSize: "0.95rem",
+                    fontWeight: 800,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.45rem",
+                  }}
+                >
+                  <Plane size={17} aria-hidden="true" color="var(--gold-accent)" />
+                  Gateway Flight &amp; Carrier Arbitrage ({blueprint.flights.length} Round-Trip Options)
+                </h2>
+                <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                  Select any carrier or gateway airport to update your Core All-In total &amp; map flight arc
+                </span>
+              </div>
+              {renderFlightOptionsList("workspace-gateway-flight")}
+            </div>
+          )}
+
           {/* Synchronized Interactive Slippy Web Mercator Route & Corridor Map */}
           <RouteCorridorMap
             blueprint={blueprint}
+            selectedFlight={activeFlight}
             activeDay={activeDay}
             effectiveDark={effectiveDark}
             currency={currency}
@@ -1380,7 +1612,12 @@ export default function TripSageWorkspacePage() {
               {(
                 [
                   ["itinerary", `${blueprint.days.length}-Day VRPTW Itinerary`],
-                  ["arbitrage", `Cross-Channel Stay Arbitrage (${blueprint.stays.length} Stays)`],
+                  [
+                    "arbitrage",
+                    blueprint.flights.length > 0
+                      ? `Flight & Stay Arbitrage (${blueprint.flights.length} Flights · ${blueprint.stays.length} Stays)`
+                      : `Cross-Channel Stay Arbitrage (${blueprint.stays.length} Stays)`,
+                  ],
                   ["telemetry", `${optimization.trip_spec.vehicle_name.split("(")[0].trim()} Road, Tolls & Gates`],
                 ] as const
               ).map(([tabKey, label], idx) => {
@@ -1661,58 +1898,11 @@ export default function TripSageWorkspacePage() {
               </div>
 
               {blueprint.flights.length > 0 && (
-                <div style={{ marginBlockEnd: "1.1rem" }}>
-                  <h3 style={{ fontSize: "0.95rem", fontWeight: 800, marginBlockEnd: "0.5rem" }}>
-                    Gateway Flight &amp; Virtual Interline Arbitrage
+                <div style={{ marginBlockEnd: "1.2rem" }}>
+                  <h3 style={{ fontSize: "0.95rem", fontWeight: 800, marginBlockEnd: "0.6rem" }}>
+                    Gateway Flight &amp; Virtual Interline Arbitrage ({blueprint.flights.length} Round-Trip Options)
                   </h3>
-                  {blueprint.flights.map((flt) => (
-                    <div
-                      key={flt.id}
-                      style={{
-                        padding: "0.95rem 1.1rem",
-                        borderRadius: "0.85rem",
-                        background: "var(--bg-surface)",
-                        border: "1px solid var(--border-subtle)",
-                        display: "flex",
-                        flexWrap: "wrap",
-                        justifyContent: "space-between",
-                        gap: "0.8rem",
-                      }}
-                    >
-                      <div>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
-                          <span className="badge badge-gold">{flt.carrier}</span>
-                          <span
-                            className={`badge ${
-                              flt.price_provenance === "live_verified"
-                                ? "badge-emerald"
-                                : "badge-route"
-                            }`}
-                          >
-                            <Info size={11} aria-hidden="true" />{" "}
-                            {flt.provenance_label ??
-                              (flt.price_provenance === "live_verified"
-                                ? "Live Google Flights Quote"
-                                : "Distance Airfare Benchmark")}
-                          </span>
-                        </div>
-                        <div style={{ fontWeight: 800, fontSize: "0.96rem", marginBlockStart: "0.3rem" }}>
-                          {flt.route_label} ({flt.flight_numbers})
-                        </div>
-                        <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>
-                          {flt.gateway_hub_note}
-                        </div>
-                      </div>
-                      <div style={{ textAlign: "end" }}>
-                        <div style={{ fontSize: "1.2rem", fontWeight: 900, color: "var(--accent-primary)" }}>
-                          {money(flt.landed_family_total_inr)}
-                        </div>
-                        <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                          All Travelers · Saves {money(flt.savings_inr)}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                  {renderFlightOptionsList("tab-gateway-flight")}
                 </div>
               )}
 

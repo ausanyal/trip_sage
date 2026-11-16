@@ -18,6 +18,7 @@ import {
 import {
   formatMoney,
   type CurrencyCode,
+  type FlightOption,
   type ParetoBlueprint,
   type StayCandidate,
   type TimelineStop,
@@ -25,6 +26,7 @@ import {
 
 interface RouteCorridorMapProps {
   blueprint: ParetoBlueprint;
+  selectedFlight?: FlightOption | null;
   activeDay: number | null;
   effectiveDark?: boolean;
   currency?: CurrencyCode;
@@ -128,6 +130,7 @@ function fitBoundsWebMercator(
 
 export function RouteCorridorMap({
   blueprint,
+  selectedFlight,
   activeDay,
   effectiveDark = true,
   currency = "INR",
@@ -141,6 +144,18 @@ export function RouteCorridorMap({
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
   const [mapStyle, setMapStyle] = useState<"topo" | "satellite" | "vector">("topo");
   const [isDragging, setIsDragging] = useState<boolean>(false);
+
+  const activeFlight = selectedFlight ?? blueprint.flights[0] ?? null;
+  const hasFlightCoords =
+    activeFlight !== null &&
+    typeof activeFlight.origin_lat === "number" &&
+    Number.isFinite(activeFlight.origin_lat) &&
+    typeof activeFlight.origin_lng === "number" &&
+    Number.isFinite(activeFlight.origin_lng) &&
+    typeof activeFlight.dest_lat === "number" &&
+    Number.isFinite(activeFlight.dest_lat) &&
+    typeof activeFlight.dest_lng === "number" &&
+    Number.isFinite(activeFlight.dest_lng);
 
   const relevantBoundsCoords = useMemo(() => {
     const pts: Array<[number, number]> = [];
@@ -161,6 +176,10 @@ export function RouteCorridorMap({
     }
 
     if (pts.length < 2) {
+      if (activeDay === null && hasFlightCoords && activeFlight) {
+        pts.push([activeFlight.origin_lng as number, activeFlight.origin_lat as number]);
+        pts.push([activeFlight.dest_lng as number, activeFlight.dest_lat as number]);
+      }
       for (const seg of blueprint.road.segments) {
         for (const c of seg.coordinates) {
           if (c.length >= 2) pts.push([c[0], c[1]]);
@@ -176,7 +195,7 @@ export function RouteCorridorMap({
       }
     }
     return pts;
-  }, [blueprint, activeDay]);
+  }, [blueprint, activeDay, hasFlightCoords, activeFlight]);
 
   const initialFit = useMemo(
     () => fitBoundsWebMercator(relevantBoundsCoords, width, height),
@@ -306,7 +325,7 @@ export function RouteCorridorMap({
     }
   };
 
-  const { tiles, segmentsProjected, stayPins, stopPins, advisoryZone } = useMemo(() => {
+  const { tiles, segmentsProjected, stayPins, stopPins, advisoryZone, flightArc } = useMemo(() => {
     const z = view.zoom;
     const centerWx = lngToWorldX(view.centerLng, z);
     const centerWy = latToWorldY(view.centerLat, z);
@@ -444,14 +463,51 @@ export function RouteCorridorMap({
       };
     }
 
+    let fltArc: {
+      dPath: string;
+      oPt: ProjectedPoint;
+      dPt: ProjectedPoint;
+      midPt: ProjectedPoint;
+      originLabel: string;
+      arcBadge: string;
+      badgeW: number;
+    } | null = null;
+
+    if (hasFlightCoords && activeFlight) {
+      const oPt = proj(activeFlight.origin_lng as number, activeFlight.origin_lat as number);
+      const dPt = proj(activeFlight.dest_lng as number, activeFlight.dest_lat as number);
+      const chord = Math.hypot(dPt.x - oPt.x, dPt.y - oPt.y);
+      const midX = (oPt.x + dPt.x) / 2;
+      const midY = (oPt.y + dPt.y) / 2;
+      const lift = Math.min(115, Math.max(32, chord * 0.24));
+      const ctrlX = midX;
+      const ctrlY = midY - lift;
+      const curveMidX = 0.25 * oPt.x + 0.5 * ctrlX + 0.25 * dPt.x;
+      const curveMidY = 0.25 * oPt.y + 0.5 * ctrlY + 0.25 * dPt.y;
+      const oCode = activeFlight.origin_iata || "ORIG";
+      const dCode = activeFlight.dest_iata || "DEST";
+      const arcBadge = `${oCode} ✈ ${dCode} · ${activeFlight.duration}`;
+
+      fltArc = {
+        dPath: `M ${oPt.x.toFixed(1)} ${oPt.y.toFixed(1)} Q ${ctrlX.toFixed(1)} ${ctrlY.toFixed(1)} ${dPt.x.toFixed(1)} ${dPt.y.toFixed(1)}`,
+        oPt,
+        dPt,
+        midPt: { x: curveMidX, y: curveMidY },
+        originLabel: `${oCode} Airport`,
+        arcBadge,
+        badgeW: Math.max(128, Math.round(arcBadge.length * 6.2 + 22)),
+      };
+    }
+
     return {
       tiles: tileItems,
       segmentsProjected: segs,
       stayPins: sPins,
       stopPins: rawStops,
       advisoryZone: advZone,
+      flightArc: fltArc,
     };
-  }, [view, blueprint, activeDay, effectiveDark, mapStyle]);
+  }, [view, blueprint, activeDay, effectiveDark, mapStyle, hasFlightCoords, activeFlight]);
 
   const selectedStop = stopPins.find((p) => p.stop.id === selectedPinId);
 
@@ -487,9 +543,9 @@ export function RouteCorridorMap({
           {blueprint.road.total_distance_km} km · {blueprint.road.total_drive_hours}h · Z{view.zoom}
         </span>
 
-        {blueprint.flights.length > 0 && (
+        {activeFlight && (
           <span className="badge badge-gold">
-            <Plane size={12} aria-hidden="true" /> {blueprint.flights[0].route_label}
+            <Plane size={12} aria-hidden="true" /> {activeFlight.route_label} · {activeFlight.carrier.split("/")[0].trim()}
           </span>
         )}
 
@@ -620,6 +676,10 @@ export function RouteCorridorMap({
             blockSize: "100%",
           }}
         >
+          <title>
+            Interactive route map for {blueprint.name}
+            {activeFlight ? ` including ${activeFlight.route_label} flight corridor` : ""}
+          </title>
           <defs>
             <pattern id="topoGrid" width="44" height="44" patternUnits="userSpaceOnUse">
               <path
@@ -641,6 +701,75 @@ export function RouteCorridorMap({
           </defs>
 
           {mapStyle === "vector" && <rect width={width} height={height} fill="url(#topoGrid)" />}
+
+          {/* Curved Gateway Flight Arc Overlay (Origin Hub -> Destination Gateway) */}
+          {flightArc && (
+            <g opacity={activeDay === null || activeDay === 1 || activeDay === blueprint.days.length ? 1 : 0.35}>
+              <path
+                d={flightArc.dPath}
+                fill="none"
+                stroke="rgba(8, 17, 30, 0.72)"
+                strokeWidth="6.5"
+                strokeLinecap="round"
+              />
+              <path
+                d={flightArc.dPath}
+                fill="none"
+                stroke="#fbbf24"
+                strokeWidth="2.8"
+                strokeDasharray="9 7"
+                strokeLinecap="round"
+                className="route-flow-dash"
+              />
+              <g transform={`translate(${flightArc.oPt.x}, ${flightArc.oPt.y})`}>
+                <circle r="13" fill="rgba(251, 191, 36, 0.24)" />
+                <circle r="7.5" fill="#f59e0b" stroke="#ffffff" strokeWidth="2.2" />
+                <rect
+                  x="-42"
+                  y="-28"
+                  width="84"
+                  height="18"
+                  rx="5"
+                  fill="rgba(8, 17, 30, 0.9)"
+                  stroke="rgba(251, 191, 36, 0.55)"
+                />
+                <text
+                  x="0"
+                  y="-15.5"
+                  textAnchor="middle"
+                  fill="#fde68a"
+                  fontSize="10"
+                  fontWeight="700"
+                >
+                  {flightArc.originLabel}
+                </text>
+              </g>
+              {activeDay === null && (
+                <g transform={`translate(${flightArc.midPt.x}, ${flightArc.midPt.y})`}>
+                  <rect
+                    x={-flightArc.badgeW / 2}
+                    y="-11"
+                    width={flightArc.badgeW}
+                    height="22"
+                    rx="6"
+                    fill="rgba(8, 17, 30, 0.92)"
+                    stroke="#fbbf24"
+                    strokeWidth="1.2"
+                  />
+                  <text
+                    x="0"
+                    y="3.5"
+                    textAnchor="middle"
+                    fill="#fef08a"
+                    fontSize="10.2"
+                    fontWeight="700"
+                  >
+                    {flightArc.arcBadge}
+                  </text>
+                </g>
+              )}
+            </g>
+          )}
 
           {/* Dynamic Corridor Checkpost / Ghat / Reserve Advisory Overlay */}
           {advisoryZone && (
@@ -994,6 +1123,11 @@ export function RouteCorridorMap({
           <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
             <Hotel size={13} aria-hidden="true" color="#10b981" /> Stay Anchors (Click pin for fee breakdown)
           </span>
+          {flightArc && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
+              <Plane size={13} aria-hidden="true" color="#fbbf24" /> Gateway Flight Arc
+            </span>
+          )}
           <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
             <Mountain size={13} aria-hidden="true" color="#fbbf24" /> Climbs &amp; Trails
           </span>

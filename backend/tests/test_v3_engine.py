@@ -442,6 +442,45 @@ class TestTripSageV3Engine(unittest.IsolatedAsyncioTestCase):
         self.assertIn("event: complete", chat_joined)
         self.assertIn("Pure Veg", chat_joined)
 
+    async def test_fly_and_stay_indonesia_multi_option_flights_and_gateway_resolution(self) -> None:
+        base_spec = TripSpec(
+            origin="Bengaluru",
+            destination="Coorg",
+            start_date="2026-12-20",
+            end_date="2026-12-25",
+            party=TravelParty(adults=2, children=2, child_ages=[8, 10]),
+        )
+        parsed_spec, updates, _ = _deterministic_nlp_extract(
+            ChatTurnRequest(
+                message="Plan a fly and stay trip from Bangalore to Indonesia in a 2 BHK villa",
+                current_spec=base_spec,
+            )
+        )
+        self.assertEqual(parsed_spec.transport_mode, "flight")
+        self.assertEqual(parsed_spec.origin, "Bangalore")
+        self.assertEqual(parsed_spec.destination, "Indonesia")
+        self.assertTrue(any("Fly + Stay" in u for u in updates))
+
+        opt = await solve_trip_pareto(parsed_spec, persist_snapshot=False)
+        top_bp = opt.blueprints[0]
+        self.assertGreaterEqual(len(top_bp.flights), 3)
+        f0 = top_bp.flights[0]
+        self.assertEqual(f0.origin_iata, "BLR")
+        self.assertEqual(f0.dest_iata, "DPS")
+        self.assertIsNotNone(f0.origin_lat)
+        self.assertIsNotNone(f0.dest_lat)
+        self.assertTrue((f0.skyscanner_url or "").startswith("https://www.skyscanner.co.in/transport/flights/blr/dps"))
+        self.assertGreaterEqual(len(f0.inclusions), 1)
+        # Ensure country-level "Indonesia" resolved to Bali (short airport transfer, not 5,800 km Borneo transfer!)
+        self.assertLess(top_bp.road.total_distance_km, 450.0)
+        # Verify core_landed counts ONLY the active round-trip flight option, not the sum of all alternatives
+        expected_core = (
+            sum(s.best_landed_inr for s in top_bp.stays)
+            + top_bp.road.total_road_cost_inr
+            + f0.landed_family_total_inr
+        )
+        self.assertEqual(top_bp.total_core_landed_inr, expected_core)
+
 
 if __name__ == "__main__":
     unittest.main()
