@@ -139,7 +139,7 @@ export function RouteCorridorMap({
   const height = 420;
 
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
-  const [showStreetTiles, setShowStreetTiles] = useState<boolean>(true);
+  const [mapStyle, setMapStyle] = useState<"topo" | "satellite" | "vector">("topo");
   const [isDragging, setIsDragging] = useState<boolean>(false);
 
   const relevantBoundsCoords = useMemo(() => {
@@ -282,18 +282,37 @@ export function RouteCorridorMap({
     const yStart = Math.max(0, Math.floor(topLeftWy / TILE_SIZE));
     const yEnd = Math.min(maxTileIdx - 1, Math.floor((topLeftWy + height) / TILE_SIZE));
 
-    const subdomains = ["a", "b", "c"];
-    const styleSlug = effectiveDark ? "dark_all" : "rastertiles/voyager";
-    const tileItems: Array<{ key: string; url: string; left: number; top: number }> = [];
+    const tileItems: Array<{
+      key: string;
+      primaryUrl: string;
+      overlayUrl?: string;
+      fallbackOsmUrl: string;
+      left: number;
+      top: number;
+    }> = [];
 
-    if (showStreetTiles) {
+    if (mapStyle !== "vector") {
       for (let tx = xStart; tx <= xEnd; tx++) {
         const wrappedX = ((tx % maxTileIdx) + maxTileIdx) % maxTileIdx;
         for (let ty = yStart; ty <= yEnd; ty++) {
-          const sub = subdomains[Math.abs(tx + ty) % subdomains.length];
+          let primaryUrl: string;
+          let overlayUrl: string | undefined;
+
+          if (mapStyle === "satellite") {
+            primaryUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${wrappedX}`;
+            overlayUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/${z}/${ty}/${wrappedX}`;
+          } else if (effectiveDark) {
+            primaryUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${z}/${ty}/${wrappedX}`;
+            overlayUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/${z}/${ty}/${wrappedX}`;
+          } else {
+            primaryUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/${z}/${ty}/${wrappedX}`;
+          }
+
           tileItems.push({
-            key: `${z}-${tx}-${ty}-${effectiveDark ? "d" : "l"}`,
-            url: `https://${sub}.basemaps.cartocdn.com/${styleSlug}/${z}/${wrappedX}/${ty}@2x.png`,
+            key: `${z}-${tx}-${ty}-${mapStyle}-${effectiveDark ? "d" : "l"}`,
+            primaryUrl,
+            overlayUrl,
+            fallbackOsmUrl: `https://tile.openstreetmap.org/${z}/${wrappedX}/${ty}.png`,
             left: tx * TILE_SIZE - topLeftWx,
             top: ty * TILE_SIZE - topLeftWy,
           });
@@ -371,7 +390,7 @@ export function RouteCorridorMap({
       stopPins: rawStops,
       advisoryZone: advZone,
     };
-  }, [view, blueprint, activeDay, effectiveDark, showStreetTiles]);
+  }, [view, blueprint, activeDay, effectiveDark, mapStyle]);
 
   const selectedStop = stopPins.find((p) => p.stop.id === selectedPinId);
 
@@ -470,7 +489,7 @@ export function RouteCorridorMap({
           color: "#f8fafc",
         }}
       >
-        {/* Layer 1: Retina @2x Web Mercator Slippy Tiles (CARTO Dark Matter / Voyager) */}
+        {/* Layer 1: Keyless Web Mercator Slippy Tiles (Esri World Topo / Dark Canvas / Imagery + OSM Fallback) */}
         <div
           aria-hidden="true"
           style={{
@@ -480,24 +499,50 @@ export function RouteCorridorMap({
           }}
         >
           {tiles.map((t) => (
-            <img
-              key={t.key}
-              src={t.url}
-              alt=""
-              draggable={false}
-              onError={(ev) => {
-                ev.currentTarget.style.display = "none";
-              }}
-              style={{
-                position: "absolute",
-                left: `${(t.left / width) * 100}%`,
-                top: `${(t.top / height) * 100}%`,
-                width: `${(TILE_SIZE / width) * 100}%`,
-                height: `${(TILE_SIZE / height) * 100}%`,
-                maxInlineSize: "none",
-                opacity: effectiveDark ? 0.92 : 0.96,
-              }}
-            />
+            <React.Fragment key={t.key}>
+              <img
+                src={t.primaryUrl}
+                alt=""
+                draggable={false}
+                onError={(ev) => {
+                  const img = ev.currentTarget;
+                  if (img.dataset.fallbackTried !== "1") {
+                    img.dataset.fallbackTried = "1";
+                    img.src = t.fallbackOsmUrl;
+                  } else {
+                    img.style.display = "none";
+                  }
+                }}
+                style={{
+                  position: "absolute",
+                  left: `${(t.left / width) * 100}%`,
+                  top: `${(t.top / height) * 100}%`,
+                  width: `${(TILE_SIZE / width) * 100}%`,
+                  height: `${(TILE_SIZE / height) * 100}%`,
+                  maxInlineSize: "none",
+                  opacity: effectiveDark ? 0.94 : 0.98,
+                }}
+              />
+              {t.overlayUrl && (
+                <img
+                  src={t.overlayUrl}
+                  alt=""
+                  draggable={false}
+                  onError={(ev) => {
+                    ev.currentTarget.style.display = "none";
+                  }}
+                  style={{
+                    position: "absolute",
+                    left: `${(t.left / width) * 100}%`,
+                    top: `${(t.top / height) * 100}%`,
+                    width: `${(TILE_SIZE / width) * 100}%`,
+                    height: `${(TILE_SIZE / height) * 100}%`,
+                    maxInlineSize: "none",
+                    opacity: 0.92,
+                  }}
+                />
+              )}
+            </React.Fragment>
           ))}
         </div>
 
@@ -533,7 +578,7 @@ export function RouteCorridorMap({
             </linearGradient>
           </defs>
 
-          {!showStreetTiles && <rect width={width} height={height} fill="url(#topoGrid)" />}
+          {mapStyle === "vector" && <rect width={width} height={height} fill="url(#topoGrid)" />}
 
           {/* Dynamic Corridor Checkpost / Ghat / Reserve Advisory Overlay */}
           {advisoryZone && (
@@ -813,16 +858,30 @@ export function RouteCorridorMap({
           </button>
           <button
             type="button"
-            onClick={() => setShowStreetTiles((v) => !v)}
-            aria-pressed={showStreetTiles}
-            aria-label="Toggle street map tiles"
-            title={showStreetTiles ? "Switch to vector topo grid" : "Switch to live street tiles"}
+            onClick={() =>
+              setMapStyle((prev) =>
+                prev === "topo" ? "satellite" : prev === "satellite" ? "vector" : "topo"
+              )
+            }
+            aria-label={`Cycle map layer (current: ${mapStyle})`}
+            title={
+              mapStyle === "topo"
+                ? "Switch to Satellite Imagery"
+                : mapStyle === "satellite"
+                ? "Switch to Vector Topo Grid"
+                : "Switch to Street & Terrain Map"
+            }
             style={{
               inlineSize: "2.15rem",
               blockSize: "2.15rem",
               borderRadius: "0.55rem",
               border: "1px solid rgba(148, 163, 184, 0.35)",
-              background: showStreetTiles ? "rgba(16, 185, 129, 0.88)" : "rgba(8, 17, 30, 0.88)",
+              background:
+                mapStyle === "topo"
+                  ? "rgba(16, 185, 129, 0.88)"
+                  : mapStyle === "satellite"
+                  ? "rgba(14, 165, 233, 0.9)"
+                  : "rgba(8, 17, 30, 0.88)",
               color: "#ffffff",
               display: "grid",
               placeItems: "center",
@@ -833,8 +892,8 @@ export function RouteCorridorMap({
           </button>
         </div>
 
-        {/* OSM & CARTO Attribution Pill */}
-        {showStreetTiles && (
+        {/* Keyless Basemap Attribution Pill */}
+        {mapStyle !== "vector" && (
           <div
             style={{
               position: "absolute",
@@ -849,7 +908,7 @@ export function RouteCorridorMap({
               pointerEvents: "none",
             }}
           >
-            Drag to pan · © OpenStreetMap · © CARTO
+            Drag to pan · {mapStyle === "satellite" ? "Satellite" : "Topo"} · © OpenStreetMap · Esri
           </div>
         )}
       </div>
