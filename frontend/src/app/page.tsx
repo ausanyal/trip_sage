@@ -17,7 +17,9 @@ import {
   MapPin,
   Moon,
   Mountain,
+  Pause,
   Plane,
+  Play,
   Plus,
   Search,
   Share2,
@@ -302,11 +304,29 @@ export default function TripSageWorkspacePage() {
   const [toastText, setToastText] = useState<string>("");
 
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const routeBannerVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [bannerVideoPaused, setBannerVideoPaused] = useState<boolean>(false);
+
+  useEffect(() => {
+    const vid = routeBannerVideoRef.current;
+    if (!vid) return;
+    vid.muted = true;
+    vid.playsInline = true;
+    if (bannerVideoPaused) {
+      vid.pause();
+    } else {
+      vid.play().catch(() => {});
+    }
+  }, [bannerVideoPaused, hasActiveTrip, optimization.trip_spec.transport_mode]);
 
   useEffect(() => {
     // MANDATORY: Feature detect 'popover' on HTMLElement.prototype
     if (typeof HTMLElement !== "undefined") {
       setSupportsPopover("popover" in HTMLElement.prototype);
+    }
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setBannerVideoPaused(true);
     }
 
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -1240,30 +1260,69 @@ export default function TripSageWorkspacePage() {
             />
           ) : (
             <>
-          {/* Trip Summary Hero Banner */}
-          <div
-            style={{
-              padding: "1.1rem 1.25rem",
-              borderRadius: "1rem",
-              background: "var(--bg-surface)",
-              border: "1px solid var(--border-subtle)",
-              display: "flex",
-              flexWrap: "wrap",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "1rem",
-            }}
-          >
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem", alignItems: "center" }}>
-                <span className="badge badge-route">
+          {/* Cinematic Active Route Stage (MotionSites Liquid-Glass + Editorial Serif) */}
+          <div className="ms-active-route-banner">
+            <video
+              ref={routeBannerVideoRef}
+              className="ms-active-route-video"
+              src={
+                optimization.trip_spec.transport_mode === "road"
+                  ? "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260511_131941_d136af49-e243-493a-be14-6ff3f24e09e6.mp4"
+                  : optimization.trip_spec.transport_mode === "hybrid"
+                  ? "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260402_054547_9875cfc5-155a-4229-8ec8-b7ba7125cbf8.mp4"
+                  : "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260405_170732_8a9ccda6-5cff-4628-b164-059c500a2b41.mp4"
+              }
+              autoPlay
+              muted
+              loop
+              playsInline
+              preload="metadata"
+              aria-hidden="true"
+            />
+            <div className="ms-active-route-scrim" aria-hidden="true" />
+            <div className="ms-noise-overlay" aria-hidden="true" />
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.42rem", minInlineSize: 0 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", alignItems: "center" }}>
+                <span
+                  className="liquid-glass"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.32rem",
+                    padding: "0.22rem 0.65rem",
+                    borderRadius: "999px",
+                    fontSize: "0.72rem",
+                    fontWeight: 600,
+                    color: "#e0f2fe",
+                  }}
+                >
+                  {optimization.trip_spec.transport_mode === "road" ? (
+                    <Car size={12} aria-hidden="true" color="#38bdf8" />
+                  ) : (
+                    <Plane size={12} aria-hidden="true" color="#fbbf24" />
+                  )}
                   {optimization.trip_spec.transport_mode === "road"
                     ? "Pure Road Trip · Own Car"
                     : optimization.trip_spec.transport_mode === "hybrid"
                     ? "Hybrid · Fly + Drive"
                     : "Fly + Stay"}
                 </span>
-                <span className="badge badge-gold">
+
+                <span
+                  className="liquid-glass"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.32rem",
+                    padding: "0.22rem 0.65rem",
+                    borderRadius: "999px",
+                    fontSize: "0.72rem",
+                    fontWeight: 600,
+                    color: "#fde68a",
+                  }}
+                >
+                  <Hotel size={12} aria-hidden="true" color="#34d399" />
                   {optimization.trip_spec.stay_strategy === "hybrid"
                     ? `Hybrid Stays (Hotel + ${optimization.trip_spec.destination_villa_bhk}BHK Villa)`
                     : optimization.trip_spec.stay_strategy === "villas"
@@ -1272,7 +1331,8 @@ export default function TripSageWorkspacePage() {
                       : "Villas (Airbnb / The Blue Kite / StayVista)"
                     : "Hotels & Resorts"}
                 </span>
-                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600 }}>
+
+                <span style={{ fontSize: "0.76rem", color: "rgba(226, 232, 240, 0.8)", fontWeight: 500 }}>
                   {optimization.trip_spec.start_date} to {optimization.trip_spec.end_date} ·{" "}
                   {optimization.trip_spec.party.adults}{" "}
                   {optimization.trip_spec.party.adults === 1 ? "Adult" : "Adults"} +{" "}
@@ -1284,78 +1344,70 @@ export default function TripSageWorkspacePage() {
                 </span>
               </div>
 
-              <h2
-                style={{
-                  margin: 0,
-                  fontSize: "1.32rem",
-                  fontWeight: 800,
-                  letterSpacing: "-0.02em",
-                  display: "flex",
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                  gap: "0.5rem",
-                }}
-              >
+              <h2 className="ms-route-title">
                 <span>{optimization.trip_spec.origin}</span>
-                <ArrowRight size={18} aria-hidden="true" color="var(--accent-primary)" />
-                <span>{optimization.trip_spec.destination}</span>
+                <ArrowRight size={19} aria-hidden="true" color="#34d399" style={{ alignSelf: "center" }} />
+                <span className="ms-serif-accent" style={{ fontSize: "1.14em" }}>
+                  {optimization.trip_spec.destination}
+                </span>
               </h2>
-              <p style={{ margin: 0, fontSize: "0.83rem", color: "var(--text-secondary)" }}>
+
+              <p style={{ margin: 0, fontSize: "0.8rem", color: "rgba(203, 213, 225, 0.86)" }}>
                 {optimization.trip_spec.transport_mode === "flight" ? "Transfers" : "Vehicle"}:{" "}
-                <strong>{optimization.trip_spec.vehicle_name}</strong> ·{" "}
+                <strong style={{ color: "#ffffff" }}>{optimization.trip_spec.vehicle_name}</strong> ·{" "}
                 {optimization.trip_spec.transport_mode === "flight" ? "Schedule" : "Rollout"}:{" "}
-                <strong>{optimization.trip_spec.departure_time_pref}</strong> · Dietary:{" "}
-                <strong>
-                  {optimization.trip_spec.activities.dietary === "both"
-                    ? "Veg + Non-Veg Curated"
-                    : "Pure Veg"}
-                </strong>
+                <strong style={{ color: "#ffffff" }}>{optimization.trip_spec.departure_time_pref}</strong> ·{" "}
+                {blueprint.days.length} Days · {blueprint.road.total_distance_km} km ·{" "}
+                {optimization.trip_spec.activities.dietary === "both"
+                  ? "Veg + Non-Veg Curated"
+                  : "Pure Veg"}
               </p>
             </div>
 
-            {/* Landed Cost Rollup */}
-            <div
-              style={{
-                display: "flex",
-                gap: "1.1rem",
-                alignItems: "center",
-                padding: "0.75rem 1rem",
-                borderRadius: "0.85rem",
-                background: "var(--bg-elevated)",
-                border: "1px solid var(--border-subtle)",
-              }}
-            >
-              <div>
-                <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 700 }}>
-                  CORE ALL-IN ({currency} · STAYS +{" "}
-                  {optimization.trip_spec.transport_mode === "flight" ? "TRANSFERS" : "ROAD"}
-                  {blueprint.flights.length ? " + FLIGHTS" : ""})
-                </div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
-                  <span style={{ fontSize: "1.45rem", fontWeight: 900, color: "var(--accent-primary)" }}>
-                    {money(displayedCoreLandedInr)}
-                  </span>
-                  {displayedUnoptBaselineInr > displayedCoreLandedInr && (
-                    <span
-                      style={{
-                        fontSize: "0.84rem",
-                        textDecoration: "line-through",
-                        color: "var(--text-muted)",
-                      }}
-                    >
-                      {money(displayedUnoptBaselineInr)}
-                    </span>
-                  )}
-                </div>
-                {activeFlight && (
-                  <div style={{ fontSize: "0.73rem", color: "var(--gold-accent)", fontWeight: 700 }}>
-                    Includes {activeFlight.origin_iata ?? "Outbound"} → {activeFlight.dest_iata ?? "Return"} round-trip ({money(activeFlight.landed_family_total_inr)} for party)
-                  </div>
+            {/* Liquid-Glass Workspace Controls (Replaces duplicate Core All-In card) */}
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.45rem" }}>
+              <button
+                type="button"
+                className="liquid-glass ms-glass-action"
+                aria-expanded={showParamsDrawer}
+                aria-controls="trip-params-panel"
+                onClick={() => setShowParamsDrawer((v) => !v)}
+              >
+                <SlidersHorizontal size={13} aria-hidden="true" color="#34d399" />
+                <span>{showParamsDrawer ? "Close Spec" : "Tune Route Spec"}</span>
+              </button>
+
+              <button
+                type="button"
+                className="liquid-glass ms-glass-action"
+                onClick={() => {
+                  setActiveTab("arbitrage");
+                  document.getElementById("tab-arbitrage")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                }}
+              >
+                <TrendingDown size={13} aria-hidden="true" color="#fbbf24" />
+                <span>Compare {allArbitrageStays.length} Stays</span>
+              </button>
+
+              <button
+                type="button"
+                className="liquid-glass ms-glass-action"
+                aria-pressed={bannerVideoPaused}
+                aria-label={
+                  bannerVideoPaused
+                    ? "Play route atmosphere video"
+                    : "Pause route atmosphere video"
+                }
+                title={bannerVideoPaused ? "Play atmosphere video" : "Pause atmosphere video"}
+                onClick={() => setBannerVideoPaused((v) => !v)}
+                style={{ paddingInline: "0.58rem" }}
+              >
+                {bannerVideoPaused ? (
+                  <Play size={13} aria-hidden="true" />
+                ) : (
+                  <Pause size={13} aria-hidden="true" />
                 )}
-                <div style={{ fontSize: "0.73rem", color: "var(--text-muted)" }}>
-                  + ~{money(blueprint.dining_and_activities_est_inr)} est. {blueprint.days.length}-day dining &amp; activity tickets
-                </div>
-              </div>
+              </button>
             </div>
           </div>
 
@@ -1431,22 +1483,9 @@ export default function TripSageWorkspacePage() {
                   <button
                     key={bp.id}
                     type="button"
+                    className="ms-pareto-card"
                     onClick={() => setSelectedBlueprintIdx(idx)}
                     aria-pressed={isSelected}
-                    style={{
-                      textAlign: "start",
-                      padding: "0.95rem 1.05rem",
-                      borderRadius: "0.9rem",
-                      cursor: "pointer",
-                      background: isSelected ? "var(--bg-elevated)" : "var(--bg-surface)",
-                      border: isSelected
-                        ? "2px solid var(--accent-primary)"
-                        : "1px solid var(--border-subtle)",
-                      color: "var(--text-primary)",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "0.45rem",
-                    }}
                   >
                     <div
                       style={{
@@ -1463,15 +1502,22 @@ export default function TripSageWorkspacePage() {
                       >
                         <Award size={12} aria-hidden="true" /> {bp.rank_badge}
                       </span>
-                      <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--gold-accent)" }}>
+                      <span
+                        style={{
+                          fontSize: "0.72rem",
+                          fontWeight: 700,
+                          color: "var(--gold-accent)",
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
                         Fatigue {bp.fatigue_score} · Score {bp.deal_anomaly_score}
                       </span>
                     </div>
 
-                    <div style={{ fontWeight: 800, fontSize: "0.93rem", lineHeight: 1.3 }}>
+                    <div style={{ fontWeight: 700, fontSize: "0.93rem", lineHeight: 1.28, letterSpacing: "-0.01em" }}>
                       {bp.name}
                     </div>
-                    <div style={{ fontSize: "0.77rem", color: "var(--text-muted)" }}>
+                    <div style={{ fontSize: "0.76rem", color: "var(--text-muted)" }}>
                       {bp.strategy_subtitle}
                     </div>
 
@@ -1485,10 +1531,17 @@ export default function TripSageWorkspacePage() {
                         alignItems: "baseline",
                       }}
                     >
-                      <strong style={{ fontSize: "1.08rem" }}>
+                      <strong style={{ fontSize: "1.08rem", fontVariantNumeric: "tabular-nums" }}>
                         {money(bp.total_core_landed_inr)}
                       </strong>
-                      <span style={{ fontSize: "0.75rem", color: "var(--accent-primary)", fontWeight: 700 }}>
+                      <span
+                        style={{
+                          fontSize: "0.75rem",
+                          color: "var(--accent-primary)",
+                          fontWeight: 700,
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
                         Saves {money(bp.total_arbitrage_savings_inr)}
                       </span>
                     </div>
@@ -1831,12 +1884,33 @@ export default function TripSageWorkspacePage() {
                       <div
                         style={{
                           marginBlockStart: "auto",
-                          paddingBlockStart: "0.4rem",
-                          fontSize: "0.72rem",
-                          color: "var(--text-muted)",
+                          paddingBlockStart: "0.5rem",
+                          borderBlockStart: "1px solid var(--border-subtle)",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "0.35rem",
                         }}
                       >
-                        Tip: Click <strong>D1–D{blueprint.days.length}</strong> on the map header to preview each day&apos;s corridor &amp; time windows here.
+                        <span style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--text-muted)" }}>
+                          Preview Day Corridor &amp; Time Windows:
+                        </span>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
+                          {blueprint.days.map((d) => (
+                            <button
+                              key={`ledger-day-${d.day_number}`}
+                              type="button"
+                              className="btn"
+                              style={{
+                                minBlockSize: "1.72rem",
+                                padding: "0.14rem 0.48rem",
+                                fontSize: "0.7rem",
+                              }}
+                              onClick={() => setActiveDay(d.day_number)}
+                            >
+                              D{d.day_number} · {d.date_label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </>
                   )}

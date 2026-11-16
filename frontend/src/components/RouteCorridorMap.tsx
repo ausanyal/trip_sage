@@ -138,8 +138,11 @@ export function RouteCorridorMap({
   onSelectDay,
   onInspectStay,
 }: RouteCorridorMapProps) {
-  const width = 800;
-  const height = 440;
+  const [vpSize, setVpSize] = useState<{ width: number; height: number }>({
+    width: 760,
+    height: 310,
+  });
+  const { width, height } = vpSize;
 
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
   const [mapStyle, setMapStyle] = useState<"topo" | "satellite" | "vector">("topo");
@@ -201,8 +204,8 @@ export function RouteCorridorMap({
   }, [blueprint, activeDay, hasFlightCoords, activeFlight]);
 
   const initialFit = useMemo(
-    () => fitBoundsWebMercator(relevantBoundsCoords, width, height),
-    [relevantBoundsCoords]
+    () => fitBoundsWebMercator(relevantBoundsCoords, width, height, 50),
+    [relevantBoundsCoords, width, height]
   );
 
   const [view, setView] = useState(initialFit);
@@ -215,6 +218,25 @@ export function RouteCorridorMap({
     startWy: number;
     moved: boolean;
   } | null>(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const syncSize = () => {
+      const rect = el.getBoundingClientRect();
+      const nw = Math.max(260, Math.round(rect.width));
+      const nh = Math.max(220, Math.round(rect.height));
+      setVpSize((prev) =>
+        Math.abs(prev.width - nw) > 1 || Math.abs(prev.height - nh) > 1
+          ? { width: nw, height: nh }
+          : prev
+      );
+    };
+    syncSize();
+    const ro = new ResizeObserver(() => syncSize());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     setView(initialFit);
@@ -260,7 +282,7 @@ export function RouteCorridorMap({
         };
       });
     },
-    []
+    [width, height]
   );
 
   const handleDoubleClick = useCallback(
@@ -635,9 +657,10 @@ export function RouteCorridorMap({
         onPointerCancel={handlePointerUp}
         style={{
           position: "relative",
-          aspectRatio: `${width} / ${height}`,
           inlineSize: "100%",
-          flex: "0 0 auto",
+          flex: "1 1 285px",
+          minBlockSize: "270px",
+          maxBlockSize: "430px",
           overflow: "clip",
           cursor: isDragging ? "grabbing" : "grab",
           touchAction: "pan-y",
