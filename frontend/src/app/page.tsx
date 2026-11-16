@@ -18,6 +18,7 @@ import {
   Moon,
   Mountain,
   Plane,
+  Plus,
   Search,
   Share2,
   ShieldCheck,
@@ -33,6 +34,7 @@ import { ChatPlannerPane } from "@/components/ChatPlannerPane";
 import { DealArbitrageDialog } from "@/components/DealArbitrageDialog";
 import { RouteCorridorMap } from "@/components/RouteCorridorMap";
 import { TripParametersDrawer } from "@/components/TripParametersDrawer";
+import { WelcomeQuickStartView } from "@/components/WelcomeQuickStartView";
 import {
   DEFAULT_FX_RATES,
   formatMoney,
@@ -56,6 +58,77 @@ const CURRENCY_OPTIONS: Array<{ code: CurrencyCode; label: string }> = [
   { code: "EUR", label: "€ EUR" },
   { code: "GBP", label: "£ GBP" },
 ];
+
+const RECENT_TRIPS_STORAGE_KEY = "tripsage_recent_trips_v1";
+
+interface RecentTripEntry {
+  id: string;
+  label: string;
+  mode: TripSpec["transport_mode"];
+  optimization: OptimizationResponse;
+  messages: ChatMessage[];
+}
+
+function shortCityName(raw: string): string {
+  return (raw.split(",")[0] || raw).trim().slice(0, 18);
+}
+
+function buildRoutePillLabel(spec: TripSpec): string {
+  return `${shortCityName(spec.origin)} -> ${shortCityName(spec.destination)}`;
+}
+
+function buildCleanBlankSpec(): TripSpec {
+  const start = new Date();
+  start.setDate(start.getDate() + 14);
+  const end = new Date();
+  end.setDate(end.getDate() + 18);
+  const iso = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+      d.getDate()
+    ).padStart(2, "0")}`;
+
+  return {
+    origin: "Bengaluru",
+    destination: "Coorg",
+    start_date: iso(start),
+    end_date: iso(end),
+    departure_time_pref: "08:30 AM Departure",
+    return_timing_pref: "Post-Lunch Return",
+    transport_mode: "road",
+    stay_strategy: "villas",
+    vehicle_name: "Family SUV (Own Car)",
+    destination_villa_bhk: 2,
+    nightly_budget_min_inr: 12000,
+    nightly_budget_max_inr: 20000,
+    party: {
+      adults: 2,
+      children: 2,
+      child_ages: [8, 10],
+      room_setup: "2 BHK Entire Private Stay",
+    },
+    pinned_stays: [],
+    activities: {
+      wildlife_safari: false,
+      adventure_water: false,
+      moderate_climbs: true,
+      transit_sightseeing: false,
+      dietary: "both",
+      pace: "balanced",
+    },
+  };
+}
+
+function buildWelcomeConversation(): ChatMessage[] {
+  return [
+    {
+      id: "welcome-1",
+      role: "assistant",
+      timestamp: "Ready",
+      content:
+        "Welcome to TripSage! Describe your trip in plain English — origin, destination, dates, family size, and whether you want a Road Trip, Fly + Stay, or Hybrid Fly + Drive — or launch from the Quick-Start Trip Builder on the right.",
+    },
+  ];
+}
 
 function buildInitialWayanadConversation(
   wayanadData: OptimizationResponse
@@ -206,7 +279,9 @@ type ActiveTab = "itinerary" | "arbitrage" | "telemetry";
 type StopFilter = "all" | "climb" | "dining" | "stay_drive";
 
 export default function TripSageWorkspacePage() {
-  const [activePresetKey, setActivePresetKey] = useState<"wayanad" | "goa" | "custom">("wayanad");
+  const [hasActiveTrip, setHasActiveTrip] = useState<boolean>(false);
+  const [recentTrips, setRecentTrips] = useState<RecentTripEntry[]>([]);
+  const [activeRecentId, setActiveRecentId] = useState<string | null>(null);
   const [optimization, setOptimization] = useState<OptimizationResponse>(
     INITIAL_PRESETS.wayanad
   );
@@ -222,7 +297,42 @@ export default function TripSageWorkspacePage() {
   const [isPlanning, setIsPlanning] = useState<boolean>(false);
   const [livePhase, setLivePhase] = useState<LivePhaseStatus | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
-    buildInitialWayanadConversation(INITIAL_PRESETS.wayanad)
+    buildWelcomeConversation()
+  );
+
+  const saveRecentTripToBrowser = useCallback(
+    (opt: OptimizationResponse, chatLog: ChatMessage[]) => {
+      const entryId =
+        opt.trip_id ||
+        `local-${shortCityName(opt.trip_spec.origin).toLowerCase()}-${shortCityName(
+          opt.trip_spec.destination
+        ).toLowerCase()}`;
+      const routeLabel = buildRoutePillLabel(opt.trip_spec);
+      const entry: RecentTripEntry = {
+        id: entryId,
+        label: routeLabel,
+        mode: opt.trip_spec.transport_mode,
+        optimization: opt,
+        messages: chatLog.slice(-8),
+      };
+
+      setActiveRecentId(entryId);
+      setRecentTrips((prev) => {
+        const deduped = prev.filter(
+          (item) =>
+            item.id !== entryId &&
+            item.label.toLowerCase() !== routeLabel.toLowerCase()
+        );
+        const updated = [entry, ...deduped].slice(0, 4);
+        try {
+          localStorage.setItem(RECENT_TRIPS_STORAGE_KEY, JSON.stringify(updated));
+        } catch {
+          // Ignore storage quota errors in private browsing
+        }
+        return updated;
+      });
+    },
+    []
   );
 
   // Two-state color-scheme control (System vs. Pinned Opposite)
@@ -267,7 +377,25 @@ export default function TripSageWorkspacePage() {
       })
       .catch(() => {});
 
-    // Hydrate shareable permalink if `?trip=ts-...` is present in URL
+    // Hydrate browser-cached Recent Trips (`localStorage`) first
+    let cachedList: RecentTripEntry[] = [];
+    try {
+      const rawRecent = localStorage.getItem(RECENT_TRIPS_STORAGE_KEY);
+      if (rawRecent) {
+        const parsed = JSON.parse(rawRecent);
+        if (Array.isArray(parsed)) {
+          cachedList = parsed.filter(
+            (x): x is RecentTripEntry =>
+              Boolean(x && typeof x.id === "string" && x.optimization?.blueprints?.length)
+          );
+          setRecentTrips(cachedList);
+        }
+      }
+    } catch {
+      // Ignore malformed storage entries
+    }
+
+    // Hydrate shareable permalink if `?trip=ts-...` is present in URL; otherwise restore most recent browser search if any
     const params = new URLSearchParams(window.location.search);
     const sharedTripId = params.get("trip");
     if (sharedTripId) {
@@ -278,28 +406,49 @@ export default function TripSageWorkspacePage() {
         .then((savedPayload) => {
           if (savedPayload?.optimization) {
             const opt = savedPayload.optimization as OptimizationResponse;
+            opt.trip_id = opt.trip_id || sharedTripId;
             setOptimization(opt);
             if (opt.fx_rates) setFxRates(opt.fx_rates);
             if (opt.active_currency) setCurrency(opt.active_currency);
             setSelectedBlueprintIdx(0);
             setActiveDay(null);
-            setActivePresetKey("custom");
-            if (Array.isArray(savedPayload.messages) && savedPayload.messages.length > 0) {
-              setMessages(
-                savedPayload.messages.map(
-                  (m: { role?: "user" | "assistant"; content?: string; extracted_updates?: string[] }, i: number) => ({
-                    id: `restored-${i}`,
-                    role: m.role === "user" ? "user" : "assistant",
-                    timestamp: "Saved Permalink",
-                    content: String(m.content ?? ""),
-                    extracted_updates: m.extracted_updates,
-                  })
-                )
-              );
-            }
+            setHasActiveTrip(true);
+            const restoredMsgs: ChatMessage[] =
+              Array.isArray(savedPayload.messages) && savedPayload.messages.length > 0
+                ? savedPayload.messages.map(
+                    (
+                      m: {
+                        role?: "user" | "assistant";
+                        content?: string;
+                        extracted_updates?: string[];
+                      },
+                      i: number
+                    ) => ({
+                      id: `restored-${i}`,
+                      role: m.role === "user" ? "user" : "assistant",
+                      timestamp: "Saved Permalink",
+                      content: String(m.content ?? ""),
+                      extracted_updates: m.extracted_updates,
+                    })
+                  )
+                : buildWelcomeConversation();
+            setMessages(restoredMsgs);
+            saveRecentTripToBrowser(opt, restoredMsgs);
           }
         })
         .catch(() => {});
+    } else if (cachedList.length > 0) {
+      const latest = cachedList[0];
+      setOptimization(latest.optimization);
+      if (latest.optimization.fx_rates) setFxRates(latest.optimization.fx_rates);
+      if (latest.optimization.active_currency) {
+        setCurrency(latest.optimization.active_currency);
+      }
+      setMessages(
+        latest.messages?.length ? latest.messages : buildWelcomeConversation()
+      );
+      setActiveRecentId(latest.id);
+      setHasActiveTrip(true);
     }
 
     return () => {
@@ -308,7 +457,7 @@ export default function TripSageWorkspacePage() {
         window.clearTimeout(toastTimerRef.current);
       }
     };
-  }, []);
+  }, [saveRecentTripToBrowser]);
 
   const hideShareToast = useCallback(() => {
     if (toastTimerRef.current) {
@@ -418,48 +567,74 @@ export default function TripSageWorkspacePage() {
     [currency, fxRates]
   );
 
-  const handleSwitchPreset = (key: "wayanad" | "goa") => {
-    setActivePresetKey(key);
-    const data = key === "wayanad" ? INITIAL_PRESETS.wayanad : INITIAL_PRESETS.goa;
-    setOptimization(data);
+  const handleStartNewTrip = useCallback(() => {
+    setHasActiveTrip(false);
+    setActiveRecentId(null);
+    setShowParamsDrawer(false);
+    setActiveDay(null);
+    setMessages(buildWelcomeConversation());
+    window.history.replaceState(null, "", "/");
+  }, []);
+
+  const handleSelectRecentTrip = useCallback((entry: RecentTripEntry) => {
+    setOptimization(entry.optimization);
+    if (entry.optimization.fx_rates) setFxRates(entry.optimization.fx_rates);
+    if (entry.optimization.active_currency) {
+      setCurrency(entry.optimization.active_currency);
+    }
+    setMessages(
+      entry.messages?.length ? entry.messages : buildWelcomeConversation()
+    );
     setSelectedBlueprintIdx(0);
     setActiveDay(null);
-    window.history.replaceState(null, "", "/");
-    if (key === "wayanad") {
-      setMessages(buildInitialWayanadConversation(INITIAL_PRESETS.wayanad));
+    setActiveRecentId(entry.id);
+    setHasActiveTrip(true);
+    if (entry.optimization.trip_id) {
+      window.history.replaceState(null, "", `/?trip=${entry.optimization.trip_id}`);
     } else {
-      setMessages([
-        {
-          id: "goa-1",
-          role: "user",
-          timestamp: "Now",
-          content:
-            "Show me a Hybrid Fly + Drive family trip from Bangalore to North Goa staying in a Blue Kite private pool villa.",
-        },
-        {
-          id: "goa-2",
-          role: "assistant",
-          timestamp: "Now",
-          extracted_updates: [
-            "Mode -> Hybrid (Fly BLR->GOX + Rental SUV)",
-            "Stay -> The Blue Kite Direct (Assagao)",
-          ],
-          tool_trace: data.tool_trace,
-          content:
-            "Matched La Soria by The Blue Kite (3 BHK Pool Villa, Assagao) across thebluekite.com, MakeMyTrip, and Airbnb — booking direct saves ₹16,400 over Airbnb's service fee! Plus flying into Mopa (GOX) instead of Dabolim (GOI) saves ₹6,200 and cuts your drive to Assagao to 28 mins.",
-        },
-      ]);
+      window.history.replaceState(null, "", "/");
     }
-  };
+  }, []);
+
+  const handleRemoveRecentTrip = useCallback(
+    (entryId: string) => {
+      setRecentTrips((prev) => {
+        const next = prev.filter((item) => item.id !== entryId);
+        try {
+          localStorage.setItem(RECENT_TRIPS_STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // Ignore storage errors
+        }
+        if (activeRecentId === entryId) {
+          if (next.length > 0) {
+            const top = next[0];
+            setOptimization(top.optimization);
+            setMessages(
+              top.messages?.length ? top.messages : buildWelcomeConversation()
+            );
+            setActiveRecentId(top.id);
+            setHasActiveTrip(true);
+          } else {
+            setHasActiveTrip(false);
+            setActiveRecentId(null);
+            setMessages(buildWelcomeConversation());
+            window.history.replaceState(null, "", "/");
+          }
+        }
+        return next;
+      });
+    },
+    [activeRecentId]
+  );
 
   const handleUpdateSpec = useCallback(
     async (nextSpec: TripSpec, reasonLabel: string) => {
-      const specWithCur = { ...nextSpec, currency };
+      const specWithCur = { ...nextSpec, currency: hasActiveTrip ? currency : null };
       setOptimization((prev) => ({ ...prev, trip_spec: specWithCur }));
       setIsPlanning(true);
       setLivePhase({
         phase: "Phase 1 · Intent & Constraints",
-        detail: `Syncing ${reasonLabel}...`,
+        detail: `Solving ${reasonLabel}...`,
       });
       try {
         const updated = await consumeSsePost<OptimizationResponse>(
@@ -475,20 +650,30 @@ export default function TripSageWorkspacePage() {
           window.history.replaceState(null, "", `/?trip=${updated.trip_id}`);
         }
         setSelectedBlueprintIdx(0);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `sync-${Date.now()}`,
-            role: "assistant",
-            timestamp: "Live Sync",
-            extracted_updates: [reasonLabel],
-            content: `Synced parameter update (${reasonLabel}) -> Re-solved NSGA-II Pareto frontier: ${formatMoney(
-              updated.blueprints[0].total_core_landed_inr,
-              updated.active_currency ?? currency,
-              updated.fx_rates ?? fxRates
-            )} core all-in.`,
-          },
-        ]);
+        setActiveDay(null);
+        setHasActiveTrip(true);
+
+        const syncMsg: ChatMessage = {
+          id: `sync-${Date.now()}`,
+          role: "assistant",
+          timestamp: "Solved Live",
+          extracted_updates: [reasonLabel],
+          tool_trace: updated.tool_trace,
+          content: `Solved NSGA-II 3D Pareto frontier for ${updated.trip_spec.origin} -> ${updated.trip_spec.destination}: ${formatMoney(
+            updated.blueprints[0].total_core_landed_inr,
+            updated.active_currency ?? currency,
+            updated.fx_rates ?? fxRates
+          )} core all-in (saving ${formatMoney(
+            updated.blueprints[0].total_arbitrage_savings_inr,
+            updated.active_currency ?? currency,
+            updated.fx_rates ?? fxRates
+          )} across channels).`,
+        };
+        setMessages((prev) => {
+          const nextMsgs = [...prev, syncMsg];
+          saveRecentTripToBrowser(updated, nextMsgs);
+          return nextMsgs;
+        });
       } catch {
         // Offline graceful fallback keeps UI interactive
       } finally {
@@ -496,7 +681,7 @@ export default function TripSageWorkspacePage() {
         setLivePhase(null);
       }
     },
-    [currency, fxRates]
+    [currency, fxRates, hasActiveTrip, saveRecentTripToBrowser]
   );
 
   const handleSendMessage = useCallback(
@@ -507,12 +692,17 @@ export default function TripSageWorkspacePage() {
         timestamp: "Just now",
         content: userText,
       };
+      const baseHistory = messages;
       setMessages((prev) => [...prev, userMsg]);
       setIsPlanning(true);
       setLivePhase({
         phase: "Phase 1 · Intent & Constraints",
         detail: "Parsing natural-language trip intent & constraints...",
       });
+
+      const baseSpec = hasActiveTrip
+        ? { ...optimization.trip_spec, currency }
+        : buildCleanBlankSpec();
 
       try {
         const payload = await consumeSsePost<{
@@ -526,14 +716,27 @@ export default function TripSageWorkspacePage() {
           "/api/chat",
           {
             message: userText,
-            current_spec: { ...optimization.trip_spec, currency },
-            history: messages.map((m) => ({
+            current_spec: baseSpec,
+            history: baseHistory.map((m) => ({
               role: m.role,
               content: m.content,
             })),
           },
           (ph) => setLivePhase(ph)
         );
+
+        const assistantMsg: ChatMessage = {
+          id: `a-${Date.now()}`,
+          role: "assistant",
+          timestamp: "Just now",
+          extracted_updates: payload.extracted_updates,
+          tool_trace: payload.optimization?.tool_trace,
+          follow_up_questions: payload.follow_up_questions,
+          content: payload.assistant_reply,
+        };
+
+        const nextMsgs = [...baseHistory, userMsg, assistantMsg];
+        setMessages(nextMsgs);
 
         if (payload.optimization) {
           setOptimization(payload.optimization);
@@ -552,20 +755,9 @@ export default function TripSageWorkspacePage() {
           }
           setSelectedBlueprintIdx(0);
           setActiveDay(null);
-          setActivePresetKey("custom");
+          setHasActiveTrip(true);
+          saveRecentTripToBrowser(payload.optimization, nextMsgs);
         }
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `a-${Date.now()}`,
-            role: "assistant",
-            timestamp: "Just now",
-            extracted_updates: payload.extracted_updates,
-            tool_trace: payload.optimization?.tool_trace,
-            follow_up_questions: payload.follow_up_questions,
-            content: payload.assistant_reply,
-          },
-        ]);
       } catch {
         setMessages((prev) => [
           ...prev,
@@ -574,7 +766,7 @@ export default function TripSageWorkspacePage() {
             role: "assistant",
             timestamp: "Offline",
             content:
-              "FastAPI planner server on port 8000 is unreachable — displaying cached pre-computed optimization.",
+              "Planner API is currently unreachable — check your connection and try again.",
           },
         ]);
       } finally {
@@ -582,7 +774,53 @@ export default function TripSageWorkspacePage() {
         setLivePhase(null);
       }
     },
-    [currency, messages, optimization.trip_spec]
+    [currency, hasActiveTrip, messages, optimization.trip_spec, saveRecentTripToBrowser]
+  );
+
+  const handleTryExample = useCallback(
+    (exampleKey: "wayanad" | "goa" | "mahabaleshwar") => {
+      if (exampleKey === "mahabaleshwar") {
+        void handleSendMessage(
+          "Plan a road trip from Mumbai to Mahabaleshwar in a 3 BHK villa"
+        );
+        return;
+      }
+      const data =
+        exampleKey === "wayanad" ? INITIAL_PRESETS.wayanad : INITIAL_PRESETS.goa;
+      const sampleMsgs: ChatMessage[] =
+        exampleKey === "wayanad"
+          ? buildInitialWayanadConversation(INITIAL_PRESETS.wayanad)
+          : [
+              {
+                id: "goa-1",
+                role: "user",
+                timestamp: "Sample",
+                content:
+                  "Show me a Hybrid Fly + Drive family trip from Bangalore to North Goa staying in a Blue Kite private pool villa.",
+              },
+              {
+                id: "goa-2",
+                role: "assistant",
+                timestamp: "Sample",
+                extracted_updates: [
+                  "Mode -> Hybrid (Fly BLR->GOX + Rental SUV)",
+                  "Stay -> The Blue Kite Direct (Assagao)",
+                ],
+                tool_trace: data.tool_trace,
+                content:
+                  "Matched La Soria by The Blue Kite (3 BHK Pool Villa, Assagao) across thebluekite.com, MakeMyTrip, and Airbnb — booking direct saves ₹16,400 over Airbnb's service fee! Plus flying into Mopa (GOX) instead of Dabolim (GOI) saves ₹6,200 and cuts your drive to Assagao to 28 mins.",
+              },
+            ];
+      setOptimization(data);
+      setCurrency("INR");
+      setSelectedBlueprintIdx(0);
+      setActiveDay(null);
+      setMessages(sampleMsgs);
+      setHasActiveTrip(true);
+      window.history.replaceState(null, "", "/");
+      saveRecentTripToBrowser(data, sampleMsgs);
+    },
+    [handleSendMessage, saveRecentTripToBrowser]
   );
 
   // Accessible keyboard arrow navigation for ARIA tabs
@@ -663,31 +901,82 @@ export default function TripSageWorkspacePage() {
           </div>
         </div>
 
-        {/* Scenario Switcher */}
-        <nav aria-label="Example trip scenarios" style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+        {/* New Trip + Browser-Cached Recent Trips (`localStorage`) */}
+        <nav
+          aria-label="New trip and recent searches"
+          style={{ display: "flex", gap: "0.45rem", flexWrap: "wrap", alignItems: "center" }}
+        >
           <button
             type="button"
-            className={`btn ${activePresetKey === "wayanad" ? "btn-active-preset" : ""}`}
-            onClick={() => handleSwitchPreset("wayanad")}
+            className={`btn ${!hasActiveTrip ? "btn-active-preset" : ""}`}
+            onClick={handleStartNewTrip}
           >
-            <Car size={14} aria-hidden="true" />
-            Wayanad Road Trip
+            <Plus size={14} aria-hidden="true" />
+            <span>New Trip</span>
           </button>
-          <button
-            type="button"
-            className={`btn ${activePresetKey === "goa" ? "btn-active-preset" : ""}`}
-            onClick={() => handleSwitchPreset("goa")}
-          >
-            <Plane size={14} aria-hidden="true" />
-            Goa + The Blue Kite
-          </button>
+
+          {recentTrips.map((rt) => {
+            const isActive = hasActiveTrip && activeRecentId === rt.id;
+            return (
+              <div
+                key={rt.id}
+                className="recent-trip-group"
+                data-active={String(isActive)}
+              >
+                <button
+                  type="button"
+                  onClick={() => handleSelectRecentTrip(rt)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.4rem",
+                    padding: "0.42rem 0.55rem 0.42rem 0.7rem",
+                    border: 0,
+                    background: "transparent",
+                    color: "var(--text-primary)",
+                    fontWeight: 700,
+                    fontSize: "0.8rem",
+                    cursor: "pointer",
+                  }}
+                >
+                  {rt.mode === "road" ? (
+                    <Car size={13} aria-hidden="true" color="var(--route-blue)" />
+                  ) : (
+                    <Plane size={13} aria-hidden="true" color="var(--gold-accent)" />
+                  )}
+                  <span>{rt.label}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveRecentTrip(rt.id)}
+                  aria-label={`Remove ${rt.label} from recent trips`}
+                  title="Remove from recent trips"
+                  style={{
+                    display: "grid",
+                    placeItems: "center",
+                    inlineSize: "1.65rem",
+                    blockSize: "1.9rem",
+                    border: 0,
+                    borderInlineStart: "1px solid var(--border-subtle)",
+                    background: "transparent",
+                    color: "var(--text-muted)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <X size={12} aria-hidden="true" />
+                </button>
+              </div>
+            );
+          })}
         </nav>
 
         <div className="header-actions">
-          <span className="badge badge-emerald" style={{ padding: "0.32rem 0.65rem", fontSize: "0.76rem" }}>
-            <TrendingDown size={13} aria-hidden="true" />
-            Saved {money(blueprint.total_arbitrage_savings_inr)}
-          </span>
+          {hasActiveTrip && (
+            <span className="badge badge-emerald" style={{ padding: "0.32rem 0.65rem", fontSize: "0.76rem" }}>
+              <TrendingDown size={13} aria-hidden="true" />
+              Saved {money(blueprint.total_arbitrage_savings_inr)}
+            </span>
+          )}
 
           {/* Global + India-First Multi-Currency Switcher */}
           <div
@@ -708,26 +997,30 @@ export default function TripSageWorkspacePage() {
             ))}
           </div>
 
-          <button
-            type="button"
-            className="btn"
-            onClick={handleShareTrip}
-            aria-label="Save and copy shareable trip link"
-          >
-            <Share2 size={14} aria-hidden="true" />
-            <span>Share Trip</span>
-          </button>
+          {hasActiveTrip && (
+            <>
+              <button
+                type="button"
+                className="btn"
+                onClick={handleShareTrip}
+                aria-label="Save and copy shareable trip link"
+              >
+                <Share2 size={14} aria-hidden="true" />
+                <span>Share Trip</span>
+              </button>
 
-          <button
-            type="button"
-            className={`btn ${showParamsDrawer ? "btn-active-preset" : ""}`}
-            aria-expanded={showParamsDrawer}
-            aria-controls="trip-params-panel"
-            onClick={() => setShowParamsDrawer((v) => !v)}
-          >
-            <SlidersHorizontal size={14} aria-hidden="true" />
-            {showParamsDrawer ? "Hide Inputs" : "Edit Inputs"}
-          </button>
+              <button
+                type="button"
+                className={`btn ${showParamsDrawer ? "btn-active-preset" : ""}`}
+                aria-expanded={showParamsDrawer}
+                aria-controls="trip-params-panel"
+                onClick={() => setShowParamsDrawer((v) => !v)}
+              >
+                <SlidersHorizontal size={14} aria-hidden="true" />
+                {showParamsDrawer ? "Hide Inputs" : "Edit Inputs"}
+              </button>
+            </>
+          )}
 
           <button
             type="button"
@@ -759,6 +1052,17 @@ export default function TripSageWorkspacePage() {
         />
 
         <main id="main-content" tabIndex={-1} className="main-canvas">
+          {!hasActiveTrip ? (
+            <WelcomeQuickStartView
+              currency={currency}
+              fxRates={fxRates}
+              isPlanning={isPlanning}
+              livePhase={livePhase}
+              onLaunchSpec={handleUpdateSpec}
+              onTryExample={handleTryExample}
+            />
+          ) : (
+            <>
           {/* Trip Summary Hero Banner */}
           <div
             style={{
@@ -1617,6 +1921,8 @@ export default function TripSageWorkspacePage() {
               </div>
             </div>
           </div>
+            </>
+          )}
         </main>
       </div>
 

@@ -821,3 +821,119 @@ dialog.arbitrage-dialog[open]::backdrop {
 .route-flow-dash {
   animation: dashFlow 1.6s linear infinite;
 }
+
+/* ==========================================================================
+   Welcome Quick-Start Trip Builder Form & Post-Interaction Validation
+   ========================================================================== */
+
+.qs-label {
+  display: inline-block;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-block-end: 0.35rem;
+}
+
+.qs-input {
+  inline-size: 100%;
+  min-block-size: 3rem;
+  padding: 0.65rem 0.85rem;
+  font-size: 1rem;
+  line-height: 1.4;
+  border-radius: 0.65rem;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  box-sizing: border-box;
+  transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+@media (pointer: coarse) {
+  .qs-input {
+    min-block-size: 3.25rem;
+  }
+}
+
+.qs-error-msg {
+  display: none;
+  align-items: center;
+  gap: 0.35rem;
+  color: #ef4444;
+  font-size: 0.81rem;
+  font-weight: 600;
+  margin-block-start: 0.35rem;
+}
+
+/* Highlight empty required fields ONLY after user interaction (:user-invalid) */
+.qs-input:user-invalid,
+.qs-input.user-invalid-fallback {
+  border-color: #ef4444;
+  background-color: rgba(239, 68, 68, 0.08);
+}
+
+.qs-input:user-invalid + .qs-error-msg,
+.qs-input.user-invalid-fallback + .qs-error-msg {
+  display: flex;
+}
+
+.qs-input:required:user-valid {
+  border-color: var(--accent-primary);
+}
+
+.qs-fieldset {
+  margin: 0;
+  padding: 0.85rem 0.95rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+.qs-legend {
+  padding-inline: 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: var(--text-secondary);
+}
+
+.qs-radio-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.5rem;
+}
+
+.qs-radio-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-block-size: 3rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.qs-radio-option input[type="radio"] {
+  accent-color: var(--accent-primary);
+  inline-size: 1.05rem;
+  block-size: 1.05rem;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.recent-trip-group {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.65rem;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+
+.recent-trip-group[data-active="true"] {
+  border-color: var(--accent-primary);
+  background: var(--accent-soft-bg);
+}
