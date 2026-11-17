@@ -1427,7 +1427,7 @@ dialog.arbitrage-dialog[open]::backdrop {
   color: var(--accent-primary);
 }
 
-/* Active Trip Workspace: MotionSites Cinematic Route Banner & Pareto Cards */
+/* Active Trip Workspace: Cinematic Route Banner & Pareto Cards */
 .ms-active-route-banner {
   position: relative;
   overflow: clip;

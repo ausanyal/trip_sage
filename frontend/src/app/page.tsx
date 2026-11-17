@@ -1352,7 +1352,7 @@ export default function TripSageWorkspacePage() {
             />
           ) : (
             <>
-          {/* Cinematic Active Route Stage (MotionSites Liquid-Glass + Editorial Serif) */}
+          {/* Cinematic Active Route Stage (Liquid-Glass + Editorial Serif) */}
           <div className="ms-active-route-banner">
             <video
               ref={routeBannerVideoRef}
